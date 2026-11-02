@@ -1,0 +1,88 @@
+{
+  "example_only": true,
+  "description": "Synthetic proposed record. Media, people and timestamps are illustrative; referenced files are not included.",
+  "schema_version": 1,
+  "inspection_id": "inspection-demo",
+  "observation_id": "observation-001",
+  "revision": 1,
+  "review": {
+    "state": "draft",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "title": "Service label on cabinet C-17",
+  "area": "Room two",
+  "equipment_identifiers": [
+    {
+      "value": "C-17",
+      "basis": "inspector_narration",
+      "source_ref": "transcript-001",
+      "human_confirmed": false
+    }
+  ],
+  "capture_time": {
+    "raw_value": "2026-11-02T14:12:00Z",
+    "metadata_field": "format.tags.creation_time",
+    "interpreted_value": "2026-11-02T14:12:00Z",
+    "timezone_assumption": null,
+    "basis": "embedded_metadata",
+    "human_confirmed": false
+  },
+  "sources": [
+    {
+      "source_id": "asset-clip-001",
+      "original_filename": "inspection-clip-001.mp4",
+      "media_type": "video",
+      "duration_seconds": 28,
+      "sha256": null,
+      "sha256_note": "Real imported assets require a computed hash; this example has no media."
+    }
+  ],
+  "transcripts": [
+    {
+      "transcript_id": "transcript-001",
+      "source_id": "asset-clip-001",
+      "scope": "whole_clip",
+      "exact_speech_start_seconds": null,
+      "exact_speech_end_seconds": null,
+      "raw_text": "Room two, equipment cabinet C-17. The service label is partly detached. I cannot read the service date. Check the maintenance log.",
+      "edited_text": null
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim-001",
+      "basis": "inspector_narration",
+      "text": "The inspector reported that the service label was partly detached and the service date was unreadable.",
+      "evidence_refs": ["transcript-001"]
+    }
+  ],
+  "draft_note": {
+    "text": "The inspector reported a partly detached service label on cabinet C-17 in Room two. The service date could not be read. Check the maintenance log.",
+    "evidence_refs": ["transcript-001"],
+    "author_kind": "ai_draft"
+  },
+  "follow_ups": [
+    {
+      "text": "Check the maintenance log.",
+      "basis": "inspector_narration",
+      "evidence_refs": ["transcript-001"]
+    }
+  ],
+  "open_questions": ["What service date is recorded in the maintenance log?"],
+  "sop_references": [],
+  "compliance_assessment": null,
+  "suggested_associations": [
+    {
+      "candidate_filename": "nearby-photo-001.jpg",
+      "reason": "Reported capture time is close to this clip; content relationship requires review.",
+      "state": "proposed",
+      "usable_as_claim_evidence": false
+    }
+  ],
+  "generation": {
+    "model": null,
+    "prompt_version": "observation-draft-v1",
+    "note": "Example fixture, not an actual API response. Production records store the resolved model and request metadata."
+  }
+}
