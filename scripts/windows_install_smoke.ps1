@@ -111,6 +111,9 @@ exit $LASTEXITCODE
     $owner = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $driver + '"'),
         ('"' + (Join-Path $SetupDir 'Install-Sopmaker.ps1') + '"'), ('"' + $install + '"'), ('"' + $blockedDesktop + '"'),
         ('"' + $menu + '"'), $readyName, $releaseName) -PassThru -RedirectStandardOutput (Join-Path $root 'paused.log') -RedirectStandardError (Join-Path $root 'paused-errors.log')
+    # Keep the process handle open before it exits; Start-Process on Windows
+    # PowerShell can otherwise leave ExitCode unavailable after an async wait.
+    $null = $owner.Handle
     try {
         Assert-True ($ready.WaitOne(60000)) 'Owner did not reach the test barrier'
         & powershell.exe @arguments
@@ -118,6 +121,11 @@ exit $LASTEXITCODE
         Assert-True ((Get-Content -LiteralPath (Join-Path $install '.sopmaker-install.json') -Raw | ConvertFrom-Json).transaction -eq $beforeTransaction) 'Competing setup changed the original app'
         $release.Set() | Out-Null
         Assert-True ($owner.WaitForExit(60000)) 'Paused owner failed to exit'
+        $owner.WaitForExit()
+        $owner.Refresh()
+        Get-Content -LiteralPath (Join-Path $root 'paused.log') | Write-Host
+        Get-Content -LiteralPath (Join-Path $root 'paused-errors.log') | Write-Host
+        Write-Host ('Paused installer exit code: ' + $owner.ExitCode)
         Assert-True ($owner.ExitCode -eq 1) 'Late shortcut failure was not reported'
         Assert-True ((Get-Content -LiteralPath (Join-Path $install '.sopmaker-install.json') -Raw | ConvertFrom-Json).transaction -eq $beforeTransaction) 'Rollback did not restore the original app'
         Assert-True ((Get-FileHash -LiteralPath (Join-Path $install 'Sopmaker.exe')).Hash -eq $originalHash) 'Rollback changed the executable'
