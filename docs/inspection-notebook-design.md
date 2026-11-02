@@ -8,9 +8,9 @@ inspection is complete.
 
 For the first pilot, use a portable Windows app that reads a selected folder,
 prepares media locally, and opens a review interface in the laptop's browser.
-All AI inference uses OpenAI APIs. The user confirmed that light local media
-preparation is acceptable and that this first pass should deliver a concrete
-design and implementation plan. No hosted service is needed for the demo.
+All AI inference uses OpenAI APIs. Light local media preparation is acceptable.
+No hosted service is needed for the demo. The initial implementation follows
+this design with the scoped limits in the [README](../README.md).
 
 ## The first useful workflow
 
@@ -99,15 +99,17 @@ filenames change. Return the existing asset on duplicate import into the same
 inspection; cross-inspection reuse must be explicit. Preserve originals and
 keep previews, extracted audio, and frames as separate derivatives.
 
-Package Python and the chosen FFmpeg distribution in a portable folder.
+Package Python and PyAV's FFmpeg libraries in a portable folder.
 The inspector extracts a ZIP and opens `Sopmaker.exe`; Python, Homebrew,
 Docker, and agent CLIs are not prerequisites. Build and smoke-test that
 distribution on Windows: PyInstaller's Windows outputs require a Windows
 build environment. [PyInstaller manual](https://pyinstaller.org/en/stable/)
 
-Use Windows Credential Manager for the API key, entered in a native settings
-dialog. An environment variable is a developer-only alternative. Browser
-JavaScript never receives the key. Explain that audio, selected frames, and
+Use Windows Credential Manager or macOS Keychain for an optionally remembered
+API key. The local setup form sends the entered key only to the authenticated
+loopback server, clears the field, and never receives the saved key back.
+Session-only storage is the default; an environment variable is a developer
+alternative. Explain that audio, selected frames, and
 photo derivatives are sent to OpenAI; local storage does not mean offline AI.
 Import, existing-note search, review, and export work without a connection.
 
@@ -265,12 +267,13 @@ machine; avoid dependencies on expiring hosted URLs or developer paths.
 
 ## Build sequence and pilot criteria
 
-Use Python 3.13 for the application core, the official OpenAI Python SDK for
+Use Python 3.13 for development and packaging, the official OpenAI Python SDK for
 API calls, Pydantic for model response types, Pillow for JPEG/PNG previews and
 EXIF, SQLite for records/search/jobs, and `python-docx` for editable Word
-export. Use bundled `ffmpeg`/`ffprobe` for video and audio. A small stdlib HTTP
+export. Use PyAV's bundled FFmpeg libraries for video and audio, eliminating
+separate executable discovery and installation. A small stdlib HTTP
 server and plain HTML/CSS/JavaScript can provide the local review interface;
-native Tk dialogs cover folder selection and key entry. Package with
+browser file/folder selection and local setup cover import and key entry. Package with
 PyInstaller on a Windows runner and include third-party license notices.
 Confirm those dependencies and their versions in the first implementation
 step rather than shipping an unpinned development environment.

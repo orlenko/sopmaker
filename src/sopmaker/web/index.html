@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sopmaker · Inspection notebook</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Sopmaker home"><span class="brand-mark">s.</span> sopmaker<span class="version">POC</span></a>
+    <div class="sidebar-label">YOUR WORKSPACE</div>
+    <div class="workspace-name" id="workspace-name">Inspection notebook</div>
+    <nav aria-label="Notebook views">
+      <button class="nav active" data-view="notes"><span aria-hidden="true">▤</span> Observations <span id="note-count" class="count">0</span></button>
+      <button class="nav" data-view="evidence"><span aria-hidden="true">▧</span> Source files <span id="file-count" class="count">0</span></button>
+      <button class="nav" data-view="setup"><span aria-hidden="true">⚙</span> Setup</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="local-dot"></span> Stored on this device<p>AI processing uses your OpenAI account. You choose when it runs.</p></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>INSPECTION NOTEBOOK</span><span id="worker-status">Ready</span></header>
+    <div id="message" role="status" aria-live="polite" hidden></div>
+    <section id="view-notes" class="view">
+      <div class="heading"><div><div class="eyebrow">COLLECT · REVIEW · REPORT</div><h1>Observations</h1><p>Notes that keep their evidence close.</p></div><button class="primary" id="add-files">＋ Add evidence</button></div>
+      <div class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search notes, identifiers, or narration" aria-label="Search observations"></label><select id="state-filter" aria-label="Review state"><option value="all">All notes</option><option value="draft">Drafts</option><option value="reviewed">Reviewed</option></select><label class="small"><input id="show-archived" type="checkbox"> Previous drafts</label></div>
+      <div class="notebook-layout"><div><div id="notes-list"></div><div class="export-bar"><span id="selection-count">No notes selected</span><label><input type="checkbox" id="include-drafts"> Include drafts</label><button id="export" class="secondary">Export selected</button></div></div><div id="detail" class="detail"><div class="detail-empty"><span class="large-icon">▧</span><h2>Keep the original in view</h2><p>Select an observation to review its note, sources, and open questions together.</p></div></div></div>
+    </section>
+    <section id="view-evidence" class="view" hidden>
+      <div class="heading"><div><div class="eyebrow">THE SOURCE MATERIAL</div><h1>Source files</h1><p>Photos, short videos, and voice notes from your inspection.</p></div></div>
+      <div class="import-panel"><div><h2>Add inspection evidence</h2><p>Choose files or a folder. Import copies them into this notebook on your device.</p><p class="small">JPG, PNG, WebP · MP4, MOV, WebM · M4A, MP3, WAV and other common recordings</p></div><div class="actions"><button class="primary" id="choose-files">Choose files</button><button class="secondary" id="choose-folder">Choose folder</button></div><input id="file-picker" type="file" multiple hidden><input id="folder-picker" type="file" multiple webkitdirectory hidden></div>
+      <div class="processing-bar"><div><strong>Turn fragments into draft notes</strong><p>Processing sends selected photo previews, sampled video frames, and extracted audio to OpenAI. API charges use your key. Originals stay here.</p></div><div class="actions"><button id="cancel" class="secondary" hidden>Cancel after stage</button><button id="process" class="primary">Draft new notes</button></div></div>
+      <div id="files-list"></div>
+    </section>
+    <section id="view-setup" class="view" hidden>
+      <div class="heading"><div><div class="eyebrow">MAKE IT YOURS</div><h1>Notebook setup</h1><p>Your workspace, your API key.</p></div></div>
+      <div class="setup-grid"><form id="settings-form" class="panel"><h2>Inspection details</h2><label>Notebook name<input name="name" required maxlength="200"></label><label>Inspection timezone<input name="timezone" placeholder="e.g. America/Toronto" required><span class="help">Used only when recording metadata has no timezone. Ambiguous times stay unresolved.</span></label><label>Vocabulary and context<textarea name="context" rows="3" maxlength="4000" placeholder="Equipment names, abbreviations, and relevant terminology"></textarea></label><details><summary>Model settings</summary><label>Notes model<input name="vision_model" required></label><label>Transcription model<input name="transcription_model" required></label></details><button class="primary" type="submit">Save details</button></form>
+      <div class="panel"><h2>Bring your own OpenAI key</h2><p>Use a key from your own OpenAI API account. API billing is separate from a ChatGPT subscription.</p><p id="key-status" class="key-status">No key configured</p><form id="key-form"><label>API key<input id="api-key" type="password" autocomplete="off" spellcheck="false" required placeholder="Paste your API key"></label><label class="check-label"><input id="remember-key" type="checkbox"> Remember in the OS credential manager</label><p class="help">Unchecked: the key is held only for this app session. It is never saved in inspection files or included in exports.</p><button class="primary" type="submit">Use this key</button></form><div class="key-actions"><button class="text-button" id="load-key">Use saved key</button><button class="text-button" id="clear-key">Clear session key</button><button class="text-button" id="forget-key">Delete saved key</button></div><div class="privacy-note"><strong>Before your first upload</strong><p>Use staged, non-identifying material for the pilot. Confirm your lab permits the chosen external service before processing actual inspection records.</p></div></div></div>
+    </section>
+    <footer>Draft assistance for human review · Every note starts with a source.</footer>
+  </main>
+</body>
+</html>
