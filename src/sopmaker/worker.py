@@ -5,6 +5,7 @@ import json
 import threading
 import uuid
 
+from .exporter import export_notes
 from .media import PREPARATION_VERSION, prepare
 from .provider import PROMPT_VERSION, OpenAIProvider, safe_error
 
@@ -19,7 +20,7 @@ class Engine:
         self.thread = None
         self.progress = {"running": False, "current": None}
 
-    def start(self, asset_ids: list[str] | None = None) -> None:
+    def start(self, asset_ids: list[str] | None = None, generate_report: bool = False) -> None:
         if not self.credentials.key:
             raise ValueError("Set up your OpenAI API key first.")
         if not self.lock.acquire(blocking=False):
@@ -34,16 +35,19 @@ class Engine:
                 assets = [a for a in assets if a["id"] in asset_ids]
             else:
                 assets = [a for a in assets if a["state"] == "imported"]
+            if not assets:
+                raise ValueError("Import new files first, or explicitly select files to retry.")
             self.cancelled.clear()
             self.progress = {"running": True, "current": None}
-            self.thread = threading.Thread(target=self._run, args=(assets, settings, self.credentials.key), daemon=True)
+            self.thread = threading.Thread(target=self._run, args=(assets, settings, self.credentials.key, generate_report), daemon=True)
             self.thread.start()
         except Exception:
             self.lock.release()
             raise
 
-    def _run(self, assets, settings, key):
+    def _run(self, assets, settings, key, generate_report=False):
         provider = None
+        outcome = {}
         try:
             provider = self.provider_factory(key)
             for asset in assets:
@@ -54,12 +58,26 @@ class Engine:
                     self.process_one(asset, settings, provider)
                 except Exception as exc:
                     self.store.update_asset(asset["id"], state="error", error=safe_error(exc))
+            if generate_report:
+                ids = {asset["id"] for asset in assets}
+                incomplete = [a for a in self.store.assets() if a["id"] in ids and a["state"] != "ready"]
+                if self.cancelled.is_set() or incomplete:
+                    outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Source files and retry explicitly."}
+                else:
+                    notes = [o["id"] for o in self.store.observations() if o["asset_id"] in ids]
+                    if notes:
+                        output = export_notes(self.store, notes, include_drafts=True)
+                        outcome = {"report_url": "/exports/" + output.name, "report_notes": len(notes)}
+                    else:
+                        outcome = {"report_error": "Processing finished with no observations. Review the source files; no report was generated."}
+        except Exception as exc:
+            outcome = {"report_error": safe_error(exc)}
         finally:
             try:
                 if provider is not None:
                     provider.close()
             finally:
-                self.progress = {"running": False, "current": None}
+                self.progress = {"running": False, "current": None, **outcome}
                 self.lock.release()
 
     def stop(self):

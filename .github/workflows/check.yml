@@ -27,6 +27,7 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - run: uv run python scripts/browser_smoke.py
       - run: uv run python scripts/browser_regressions.py
+      - run: uv run python scripts/browser_quickstart.py
       - name: Exercise isolated Windows credential storage
         if: runner.os == 'Windows'
         shell: pwsh
@@ -46,8 +47,24 @@ jobs:
       - name: Zip portable application
         shell: pwsh
         run: Compress-Archive -Path dist/Sopmaker -DestinationPath dist/Sopmaker-windows-x64.zip
+      - name: Prepare Windows setup package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/Windows-Setup | Out-Null
+          Copy-Item -Path packaging/windows/* -Destination dist/Windows-Setup
+          Copy-Item -Path dist/Sopmaker -Destination dist/Windows-Setup -Recurse
+          Compress-Archive -Path dist/Windows-Setup/* -DestinationPath dist/Sopmaker-Windows-Setup.zip
+          Expand-Archive -Path dist/Sopmaker-Windows-Setup.zip -DestinationPath dist/Extracted-Setup
+      - name: Test setup and update with Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/windows_install_smoke.ps1 -SetupDir dist/Extracted-Setup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Sopmaker-windows-x64
           path: dist/Sopmaker-windows-x64.zip
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Sopmaker-Windows-Setup
+          path: dist/Sopmaker-Windows-Setup.zip
           retention-days: 7

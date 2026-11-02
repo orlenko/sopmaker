@@ -223,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/key/forget":
             credentials.forget()
         elif path == "/api/process":
-            engine.start(body.get("asset_ids"))
+            engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True)
         elif path == "/api/cancel":
             engine.stop()
         elif path == "/api/edit":

@@ -29,6 +29,40 @@ loaded only when you select **Use saved key**. No key is included in the app,
 inspection workspace, or exports. Developers can alternatively set
 `OPENAI_API_KEY` in their environment.
 
+## Windows installation for everyday use
+
+Use the **Sopmaker-Windows-Setup** download from a passing
+[build run](https://github.com/orlenko/sopmaker/actions/workflows/check.yml).
+Actions downloads require a GitHub login; someone preparing the pilot can hand
+the contained `Sopmaker-Windows-Setup.zip` directly to the inspector. This is
+a self-contained setup package, with no Python, Git, or FFmpeg setup required:
+
+1. Right-click the setup ZIP and choose **Extract All**. If GitHub wraps it in
+   another ZIP, extract the contained setup ZIP as well.
+2. Open the extracted folder and double-click **Install Sopmaker.cmd**.
+   It installs for the current user and creates desktop and Start menu shortcuts;
+   administrator rights are not needed. The browser opens when setup finishes.
+3. In **Setup**, enter your own API key and inspection timezone.
+4. Open **Source files**, drop photos, short videos, voice notes or a folder,
+   then click **Generate draft report**. Extract media ZIPs before importing.
+5. When processing finishes, click **Download draft report**, extract the ZIP,
+   and open `notes.docx` or `index.html`. Check and correct the draft before use.
+
+Generating explicitly uses the configured API key and includes unreviewed drafts.
+Each automatic report contains only its processing batch, leaving earlier notes
+in the notebook. A failed/cancelled batch or zero observations produces a visible
+message instead of a report. Retry failed files explicitly, then use selected-note
+export to combine completed notes. The existing **Draft new notes** action and
+review/export workflow are also available.
+
+Setup copies the adjacent application to `%LOCALAPPDATA%\Programs\Sopmaker`;
+it does not download code or change saved PowerShell policies. It checks bundled
+file hashes for incomplete extraction/copying; these are not code signatures.
+The package is unsigned and may need workplace IT approval. Close the app's
+console window before reinstalling/updating; the installer refuses a running
+copy and preserves notebooks and saved keys. Keep this window open while working.
+The package contains a plain-language `START HERE.txt` with recovery steps.
+
 Choose files or a folder in **Source files**. Import copies files locally;
 **Draft new notes** explicitly sends image previews, sampled video frames,
 and extracted audio to OpenAI, using your account's API billing. Failed or
@@ -80,7 +114,8 @@ paid API tests, executable builds, and a manual Windows acceptance protocol.
 GitHub Actions tests all three operating systems and builds a portable Windows
 ZIP; download the artifact from a passing workflow run, extract it, and open
 `Sopmaker.exe`. Keep its `_internal` folder beside the executable. Builds
-contain source/dependency identity and [third-party notices](docs/third-party.md).
+also include the setup ZIP described above, with automated installation/update
+checks. They contain source/dependency identity and [third-party notices](docs/third-party.md).
 
 ## Current limits
 

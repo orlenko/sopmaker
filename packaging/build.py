@@ -47,6 +47,12 @@ def main():
             "ffmpeg_version": av.ffmpeg_version_info,
             "uv_lock_sha256": hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest()}
     (output / "build-info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    manifest = {}
+    for file in sorted(output.rglob("*")):
+        if file.is_file():
+            with file.open("rb") as stream:
+                manifest[file.relative_to(output).as_posix()] = hashlib.file_digest(stream, "sha256").hexdigest()
+    (output / "payload-sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Portable folder built: {output}")
 
 

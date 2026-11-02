@@ -1,0 +1,54 @@
+SOPMAKER - WINDOWS QUICK START
+
+FIRST TIME
+1. Right-click the setup ZIP and choose Extract All.
+2. Open the extracted folder. Double-click Install Sopmaker.cmd.
+   Setup installs for your account and creates desktop and Start menu shortcuts.
+   You do not need Python, Git or FFmpeg. The runtime and media tools are bundled.
+3. Sopmaker opens your browser. Keep its small app/console window open while working.
+4. In Setup, enter your own OpenAI API key, notebook name and inspection timezone.
+   API billing is separate from ChatGPT. Processing uses your account's API credit.
+   Choose Remember only if you want the key saved in Windows Credential Manager.
+   On later launches, click Use saved key. Otherwise paste a session-only key.
+
+GENERATE A DRAFT REPORT
+1. Open the Sopmaker desktop shortcut, then Source files in the browser.
+2. Drop photos, short videos or voice recordings into the drop area. You can also
+   drop a folder, or use Choose files / Choose folder. Extract media ZIPs first.
+   Import only copies files locally; it does not call the AI service.
+3. Click Generate draft report. This sends prepared images/audio to OpenAI using
+   your key. It processes new files in this batch, then prepares a draft report.
+4. Click Download draft report when it appears. Extract the downloaded ZIP.
+   Open notes.docx for the editable Word draft, or index.html for linked evidence.
+5. Check the notes against the originals and correct mistakes before using them.
+   Automatic notes are unreviewed drafts; they are not compliance decisions.
+
+IF A FILE FAILS
+No automatic report is produced for an incomplete batch. Review Source files and
+use Retry explicitly for failed files; the API may charge for retries. After all
+files are ready, use Observations to select notes, enable Include drafts if
+needed, and Export selected. Existing notes and completed stages are preserved.
+If no observations are generated, review the original sources; no empty report
+is presented as a successful inspection.
+
+YOUR FILES
+Notebooks are in Documents\Sopmaker\Notebook for your Windows account. Back up
+that folder. The app copies originals there, so allow disk space for media and
+exports. A new batch adds to this notebook; its generated report contains only
+that batch. Use Observations to build a report from several batches.
+Close the app/console window when finished. Closing only the browser leaves the
+app running. Close Sopmaker before running setup again to update it. Updates
+replace application files, leaving notebooks and saved keys in place.
+
+TROUBLESHOOTING
+This proof of concept is unsigned. Windows or workplace policy may block it.
+Use the package supplied by the project owner; ask IT if approval is needed.
+Do not disable Defender or change your organization's security settings.
+Setup uses the Windows PowerShell included with Windows; it does not change
+your saved execution policy, download other software or ask for administrator
+access. It copies the adjacent Sopmaker folder to LocalAppData\Programs\Sopmaker.
+If setup is blocked, IT can also run the extracted Sopmaker\Sopmaker.exe directly.
+
+Removing the installed app folder and shortcuts removes the application only.
+It does not delete notebooks or credentials. Delete a saved key in Setup using
+Delete saved key before removing the app if you want it removed as well.

@@ -48,6 +48,7 @@ $("choose-folder").onclick = () => $("folder-picker").click();
 async function importFiles(files) {
   if (importing) return;
   importing = true;
+  $("process").disabled = $("generate-report").disabled = true;
   const supported = /\.(jpe?g|png|webp|mp4|mov|m4v|webm|mkv|avi|m4a|mp3|wav|aac|ogg|flac)$/i;
   let count = 0, duplicates = 0, skipped = 0;
   try {
@@ -59,9 +60,40 @@ async function importFiles(files) {
     }
     message(`Imported ${count} file(s) locally. ${duplicates} duplicate(s), ${skipped} unsupported file(s) skipped. Nothing sent to OpenAI yet.`);
     await refresh();
-  } finally { importing = false; }
+  } finally {
+    importing = false;
+    $("file-picker").value = $("folder-picker").value = "";
+    await refresh();
+  }
 }
 for (const id of ["file-picker", "folder-picker"]) $(id).onchange = event => action(() => importFiles(Array.from(event.target.files)));
+
+async function entryFiles(entry) {
+  if (entry.isFile) return [await new Promise((resolve, reject) => entry.file(resolve, reject))];
+  if (!entry.isDirectory) return [];
+  const reader = entry.createReader(), files = [];
+  while (true) {
+    const entries = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!entries.length) return files;
+    for (const child of entries) files.push(...await entryFiles(child));
+  }
+}
+// Prevent the browser navigating away when a file misses the drop area.
+for (const event of ["dragover", "drop"]) window.addEventListener(event, e => e.preventDefault());
+$("drop-zone").addEventListener("dragover", event => { event.preventDefault(); $("drop-zone").classList.add("drag-over"); });
+$("drop-zone").addEventListener("dragleave", () => $("drop-zone").classList.remove("drag-over"));
+$("drop-zone").addEventListener("drop", event => {
+  event.preventDefault(); $("drop-zone").classList.remove("drag-over");
+  const entries = Array.from(event.dataTransfer.items || []).filter(item => item.kind === "file").map(item => item.webkitGetAsEntry?.());
+  const fallback = Array.from(event.dataTransfer.files);
+  action(async () => {
+    const files = [];
+    if (entries.length && entries.every(Boolean)) {
+      for (const entry of entries) files.push(...await entryFiles(entry));
+    } else files.push(...fallback);
+    await importFiles(files);
+  });
+});
 
 async function refresh() {
   const query = new URLSearchParams({q: $("search").value});
@@ -71,7 +103,7 @@ async function refresh() {
   $("note-count").textContent = state.observations.length;
   $("file-count").textContent = state.assets.length;
   $("worker-status").textContent = state.progress.running ? `Processing ${state.progress.current || "…"}` : "Ready · saved locally";
-  $("process").disabled = state.progress.running;
+  $("process").disabled = $("generate-report").disabled = state.progress.running || importing;
   $("cancel").hidden = !state.progress.running;
   $("key-status").textContent = state.credentials.configured ? `Key ready · ${state.credentials.origin.replaceAll("_", " ")}` : "No key configured";
   if (!$("settings-form").dataset.loaded) {
@@ -79,6 +111,13 @@ async function refresh() {
     $("settings-form").dataset.loaded = "yes";
   }
   renderNotes(); renderFiles();
+  const result = $("report-result");
+  result.hidden = !state.progress.report_url && !state.progress.report_error;
+  result.replaceChildren();
+  if (state.progress.report_url) {
+    result.append(node("h2", "Your draft report is ready"), node("p", `${state.progress.report_notes} note(s) from this batch. Review and correct them before use. Extract the ZIP, then open notes.docx or index.html.`));
+    const download = node("a", "Download draft report", "primary"); download.href = state.progress.report_url; download.download = ""; result.append(download);
+  } else if (state.progress.report_error) result.append(node("p", state.progress.report_error, "file-error"));
 }
 function captureLabel(asset) {
   const time = asset.prepared?.capture_time;
@@ -224,11 +263,15 @@ function renderFiles() {
     list.append(row);
   }
 }
-$("process").onclick = () => action(async () => {
+function processNewFiles(generateReport = false) { return action(async () => {
   if (!state.credentials.configured) { view("setup"); throw new Error("Add your OpenAI API key before processing."); }
   if (!state.assets.some(a => a.state === "imported")) throw new Error("Import a new file first, or use an individual file's update/retry action.");
-  await api("/api/process", {}); message("Drafting notes. You can keep reviewing existing observations."); await refresh();
-});
+  await api("/api/process", {generate_report: generateReport});
+  message(generateReport ? "Preparing your draft report. Keep Sopmaker open; the download will appear here when ready." : "Drafting notes. You can keep reviewing existing observations.");
+  await refresh();
+}); }
+$("process").onclick = () => processNewFiles();
+$("generate-report").onclick = () => processNewFiles(true);
 $("cancel").onclick = () => action(async () => { await api("/api/cancel", {}); message("Cancellation requested. The active stage may finish before processing stops."); });
 $("settings-form").onsubmit = event => { event.preventDefault(); action(async () => { await api("/api/settings", Object.fromEntries(new FormData(event.target))); await refresh(); message("Notebook details saved."); }); };
 $("key-form").onsubmit = event => { event.preventDefault(); action(async () => {
