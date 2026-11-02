@@ -117,3 +117,35 @@ def test_cancelled_report_is_not_exported(store, photo):
     assert not engine.progress["running"]
     assert "report_url" not in engine.progress
     assert "processing stopped" in engine.progress["report_error"]
+
+
+def test_cancel_during_zip_export_never_publishes_success(store, photo, monkeypatch):
+    import threading
+
+    from sopmaker.exporter import export_notes
+
+    entered, release = threading.Event(), threading.Event()
+    def held_export(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return export_notes(*args, **kwargs)
+
+    monkeypatch.setattr("sopmaker.worker.export_notes", held_export)
+    store.import_file(photo)
+    credentials = Credentials(False)
+    credentials.set("invented-offline-key")
+    engine = Engine(store, credentials, ReportProvider)
+    engine.start(generate_report=True)
+    try:
+        assert entered.wait(timeout=5)
+        engine.stop()
+    finally:
+        release.set()
+        engine.thread.join(timeout=10)
+    assert not engine.thread.is_alive()
+    assert not engine.progress["running"]
+    assert "report_url" not in engine.progress
+    assert "processing stopped" in engine.progress["report_error"]
+    assert not list((store.root / "exports").glob("*.zip"))
+    assert store.assets()[0]["state"] == "ready"
+    assert len(store.observations()) == 1

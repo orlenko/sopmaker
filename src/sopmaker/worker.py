@@ -17,6 +17,7 @@ class Engine:
         self.provider_factory = provider_factory
         self.lock = threading.Lock()
         self.cancelled = threading.Event()
+        self.publication_lock = threading.Lock()
         self.thread = None
         self.progress = {"running": False, "current": None}
 
@@ -48,6 +49,7 @@ class Engine:
     def _run(self, assets, settings, key, generate_report=False):
         provider = None
         outcome = {}
+        output = None
         try:
             provider = self.provider_factory(key)
             for asset in assets:
@@ -77,11 +79,23 @@ class Engine:
                 if provider is not None:
                     provider.close()
             finally:
-                self.progress = {"running": False, "current": None, **outcome}
+                # Commit report visibility and cancellation under the same lock.
+                # A cancel accepted before this point cannot publish a success URL.
+                with self.publication_lock:
+                    if generate_report and self.cancelled.is_set():
+                        outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Source files and retry explicitly."}
+                        if output is not None:
+                            try:
+                                output.unlink(missing_ok=True)
+                            except OSError:
+                                outcome = {"report_error": "Report cancelled. Its unused ZIP could not be removed; no download was published."}
+                    self.progress = {"running": False, "current": None, **outcome}
                 self.lock.release()
 
     def stop(self):
-        self.cancelled.set()
+        with self.publication_lock:
+            if self.progress["running"]:
+                self.cancelled.set()
 
     def _checkpoint(self, asset_id):
         if self.cancelled.is_set():

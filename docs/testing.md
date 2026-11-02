@@ -73,6 +73,15 @@ that ZIP and tests the installer with Windows PowerShell 5.1 using disposable
 destinations: refusal to overwrite an unrelated folder, installation under a path
 with spaces, shortcut targets, the installed executable's server/export, refusal
 to update a running app, and a subsequent update with separate data preserved.
+Additional regressions put invented notebook bytes inside the install root and
+add a directory junction to separate data: setup must refuse both without
+altering data. An external test-only PowerShell debugger barrier pauses one real
+installer before commit, while it owns its exclusive setup lock. A competing
+installer must refuse; a forced late shortcut failure in the owner must then
+restore the previous transaction and retain the incomplete copy. The production
+script has no test callbacks or arbitrary-code hooks. Cancellation tests hold
+the exporter, cancel while it is running, and check that no report URL or unused
+ZIP survives. Report visibility and cancellation share a publication lock.
 It does not create shortcuts on the runner's real desktop or call OpenAI.
 The setup ZIP is uploaded as **Sopmaker-Windows-Setup**, separately from the
 portable application. Download and extract the artifact wrapper, then extract
@@ -128,6 +137,16 @@ The CMD wrapper uses a process-only `-ExecutionPolicy Bypass` invocation of
 Windows PowerShell; it does not persist a policy change or override Group Policy.
 If organizational policy blocks setup, obtain IT approval or use the permitted
 portable executable. See [Microsoft's execution-policy documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1).
+
+Installer ownership is deliberately conservative: a per-user exclusive file
+handle serializes setups across all destinations; a persistent empty lock file
+is not considered a running setup. Installed descendants must belong to their
+old payload inventory, and reparse entries are refused before traversal. Commit
+uses exact `Directory.Move` semantics rather than container-style `Move-Item`.
+Rollback moves only a matching transaction aside and restores its own backup.
+Committed directories are retained, never recursively deleted, including previous
+copies after a successful update. This preserves unexpected writes made after
+validation; it does not promise to migrate a notebook stored inside the app.
 
 Record Windows version, source/build revision, inputs, observed results and any
 manual corrections. Windows Server CI/VMs validate much of the application,

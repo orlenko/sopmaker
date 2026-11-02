@@ -62,6 +62,12 @@ The package is unsigned and may need workplace IT approval. Close the app's
 console window before reinstalling/updating; the installer refuses a running
 copy and preserves notebooks and saved keys. Keep this window open while working.
 The package contains a plain-language `START HERE.txt` with recovery steps.
+Setup serializes competing installations and refuses updates if the installed
+folder contains extra data or filesystem links. Keep notebooks outside that
+folder. Previous app copies are retained beside the installed app as
+`Sopmaker-backup-*`; failed new copies may be retained as `Sopmaker-failed-*`.
+Setup never recursively deletes a committed app folder. Review retained copies
+before manually removing them, especially if you previously put data there.
 
 Choose files or a folder in **Source files**. Import copies files locally;
 **Draft new notes** explicitly sends image previews, sampled video frames,

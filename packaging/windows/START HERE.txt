@@ -39,6 +39,12 @@ that batch. Use Observations to build a report from several batches.
 Close the app/console window when finished. Closing only the browser leaves the
 app running. Close Sopmaker before running setup again to update it. Updates
 replace application files, leaving notebooks and saved keys in place.
+Keep notebooks outside the installed application folder. Setup refuses an update
+if that folder contains extra files, notebooks or filesystem links; nothing is
+replaced in that case. It also refuses overlapping setup runs. Previous app
+copies remain beside the app in Sopmaker-backup-* folders; an incomplete new
+copy may remain in Sopmaker-failed-*. Review these copies before removing them
+manually. Setup does not recursively delete an installed app folder.
 
 TROUBLESHOOTING
 This proof of concept is unsigned. Windows or workplace policy may block it.
