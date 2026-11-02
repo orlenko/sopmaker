@@ -13,10 +13,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .exporter import export_notes
 from .media import SUPPORTED
-from .store import Conflict
+from .store import MAX_FILE_BYTES, Conflict
 
 WEB = Path(__file__).parent / "web"
-MAX_UPLOAD = 1024 * 1024 * 1024
+MAX_UPLOAD = MAX_FILE_BYTES
 
 
 class ReviewServer(ThreadingHTTPServer):
@@ -26,6 +26,7 @@ class ReviewServer(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", port), Handler)
         self.store, self.engine, self.credentials = store, engine, credentials
         self.token = secrets.token_urlsafe(32)
+        self.cookie_name = "sopmaker_" + self.token[:12]
         self.origin = f"http://127.0.0.1:{self.server_port}"
 
     @property
@@ -69,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
             cookies = SimpleCookie()
             try:
                 cookies.load(self.headers.get("Cookie", ""))
-                token = cookies["sopmaker_session"].value if "sopmaker_session" in cookies else ""
+                token = cookies[self.server.cookie_name].value if self.server.cookie_name in cookies else ""
             except Exception:
                 return False
         return hmac.compare_digest(token, self.server.token)
@@ -138,13 +139,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid media path")
             asset = store.asset(parts[2])
             name = unquote(parts[3])
-            prepared = asset["prepared"] or {"images": [], "audio": []}
+            evidence_id = query.get("evidence", [None])[0]
+            evidence = store.evidence(evidence_id, asset["id"]) if evidence_id else asset
+            prepared = evidence["prepared"] or {"images": [], "audio": []}
             allowed = {x["file"] for x in prepared["images"] + prepared["audio"]}
             if name == "original":
                 return self._file(store.root / asset["original"])
             if name not in allowed:
                 raise ValueError("Unknown derivative")
-            return self._file(store.root / "derived" / asset["id"] / name)
+            directory = prepared.get("directory", f"derived/{asset['id']}")
+            return self._file(store.root / directory / name)
         if path.path.startswith("/exports/"):
             name = path.path.rsplit("/", 1)[1]
             if not re.fullmatch(r"inspection-[a-f0-9]{12}\.zip", name):
@@ -207,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self, path, body):
         store, engine, credentials = self.server.store, self.server.engine, self.server.credentials
         if path == "/api/session":
-            return self._send(200, {"ok": True}, headers={"Set-Cookie": f"sopmaker_session={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
+            return self._send(200, {"ok": True}, headers={"Set-Cookie": f"{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
         if path == "/api/settings":
             store.save_settings(body)
         elif path == "/api/key":

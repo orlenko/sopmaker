@@ -3,6 +3,7 @@
 import hashlib
 import json
 import threading
+import uuid
 
 from .media import PREPARATION_VERSION, prepare
 from .provider import PROMPT_VERSION, OpenAIProvider, safe_error
@@ -77,24 +78,38 @@ class Engine:
             if hashlib.file_digest(stream, "sha256").hexdigest() != asset["sha256"]:
                 raise ValueError("Original content changed.")
         self.store.update_asset(aid, state="processing", error=None)
-        directory = self.store.root / "derived" / aid
+        preparation_key = hashlib.sha256(json.dumps(
+            [asset["sha256"], PREPARATION_VERSION, settings["timezone"]]
+        ).encode()).hexdigest()
         prepared = asset["prepared"]
         if (not prepared or prepared.get("version") != PREPARATION_VERSION
                 or prepared.get("zone") != settings["timezone"]
-                or not all((directory / x["file"]).is_file() for x in prepared["images"] + prepared["audio"])):
-            prepared = prepare(path, directory, aid, settings["timezone"])
+                or prepared.get("cache_key") != preparation_key
+                or not all((self.store.root / prepared["directory"] / x["file"]).is_file() for x in prepared["images"] + prepared["audio"])):
+            # Every actual preparation gets a new directory, including regeneration
+            # after missing files. Never rewrite a derivative used by an old note.
+            preparation_id = uuid.uuid4().hex
+            relative_directory = f"derived/{aid}/{preparation_id}"
+            directory = self.store.root / relative_directory
+            prepared = prepare(path, directory, f"{aid}:prep:{preparation_id}", settings["timezone"])
             prepared["zone"] = settings["timezone"]
+            prepared["cache_key"] = preparation_key
+            prepared["directory"] = relative_directory
+            prepared["revision_id"] = preparation_id
             self.store.update_asset(aid, prepared=prepared)
+        directory = self.store.root / prepared["directory"]
+        preparation_id = prepared["revision_id"]
         if not self._checkpoint(aid):
             return
         transcription_fingerprint = hashlib.sha256(json.dumps(
-            [asset["sha256"], PREPARATION_VERSION, settings["transcription_model"], settings["context"]]
+            [asset["sha256"], preparation_id, settings["transcription_model"], settings["context"]]
         ).encode()).hexdigest()
         transcript = asset["transcript"]
         if not transcript or transcript.get("fingerprint") != transcription_fingerprint:
-            transcript = {"fingerprint": transcription_fingerprint, "chunks": []}
-            # Save each completed chunk. A later chunk failing need not repeat earlier charges.
-            self.store.update_asset(aid, transcript=transcript)
+            transcript = {"fingerprint": transcription_fingerprint,
+                          "model": settings["transcription_model"], "context": settings["context"],
+                          "preparation_id": preparation_id,
+                          "chunks": self.store.cached_chunks(transcription_fingerprint)}
         completed = len(transcript["chunks"])
         for index, audio in enumerate(prepared["audio"]):
             if index < completed:
@@ -102,9 +117,13 @@ class Engine:
             if not self._checkpoint(aid):
                 return
             result = provider.transcribe(directory / audio["file"], settings["transcription_model"], settings["context"])
-            transcript["chunks"].append({"id": f"{aid}:transcript:{index}", "text": result.get("text", ""),
-                                         "start": audio["start"], "end": audio["end"], "response": result})
-            self.store.update_asset(aid, transcript=transcript)
+            chunk = {"id": f"{aid}:transcript:{transcription_fingerprint}:{index}",
+                     "text": result.get("text", ""), "start": audio["start"], "end": audio["end"], "response": result}
+            self.store.cache_chunk(transcription_fingerprint, aid, index, chunk)
+            transcript["chunks"].append(chunk)
+        # Publish only a complete transcription. Failed attempts retain their completed
+        # chunks separately and cannot replace the last complete transcript.
+        self.store.update_asset(aid, transcript=transcript)
         if not self._checkpoint(aid):
             return
         fingerprint = hashlib.sha256(json.dumps([

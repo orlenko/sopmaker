@@ -14,6 +14,7 @@ uv run ruff check .
 uv run pytest
 uv run playwright install chromium
 uv run python scripts/browser_smoke.py
+uv run python scripts/browser_regressions.py
 ```
 
 The default tests create disposable workspaces and invented images/audio/video.
@@ -21,7 +22,11 @@ They do not call OpenAI, touch a real credential store, or use personal media.
 They check deduplication, source/quote validation, timestamp ambiguity,
 interrupted jobs, edit conflicts, reprocessing, search, per-file failure, server
 access controls, credential redaction, media playback ranges, and portable export.
-The browser check exercises import, search, review, session-key setup and export.
+The browser checks exercise import, search, review, session-key setup and export,
+typing and switching notes during delayed save responses, source-only review,
+and two notebook servers sharing a browser. Evidence tests cover different
+transcripts for the same recording, partial transcription/draft failures,
+retained reviewed-note exports, immutable media paths, and version 1 migration.
 
 To inspect the app without a key or API charges:
 

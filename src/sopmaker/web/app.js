@@ -6,7 +6,7 @@ const node = (tag, text, className) => {
   if (className) element.className = className;
   return element;
 };
-let state, focused, dirty = false, searchTimer, importing = false;
+let state, focused, dirty = false, searchTimer, importing = false, detailSession = 0;
 const selected = new Set();
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.has("token")) sessionStorage.setItem("sopmaker-token", hash.get("token"));
@@ -19,12 +19,19 @@ function message(text, error = false) {
   $("message").classList.toggle("error", error);
 }
 async function api(path, body, method = "POST") {
-  const response = await fetch(path, {method: body === undefined ? "GET" : method,
-    headers: {Authorization: `Bearer ${token}`, ...(body instanceof File ? {} : {"Content-Type": "application/json"})},
-    body: body === undefined ? undefined : body instanceof File ? body : JSON.stringify(body)});
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "The request failed.");
-  return data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), body instanceof File ? 300000 : 30000);
+  try {
+    const response = await fetch(path, {method: body === undefined ? "GET" : method, signal: controller.signal,
+      headers: {Authorization: `Bearer ${token}`, ...(body instanceof File ? {} : {"Content-Type": "application/json"})},
+      body: body === undefined ? undefined : body instanceof File ? body : JSON.stringify(body)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "The request failed.");
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("The local request timed out. Your edits remain in this window; check saved revisions before retrying a save.");
+    throw error;
+  } finally { clearTimeout(timer); }
 }
 async function action(callback) {
   try { return await callback(); } catch (error) { message(error.message, true); }
@@ -81,7 +88,7 @@ function renderNotes() {
   const container = $("notes-list"); container.replaceChildren();
   const filter = $("state-filter").value;
   const notes = state.observations.filter(o => filter === "all" || o.state === filter).sort((a, b) => {
-    const time = o => state.assets.find(x => x.id === o.asset_id)?.prepared?.capture_time?.utc || "9999";
+    const time = o => o.evidence?.prepared?.capture_time?.utc || "9999";
     return time(a).localeCompare(time(b)) || a.id.localeCompare(b.id);
   });
   if (!notes.length) {
@@ -90,7 +97,7 @@ function renderNotes() {
     const button = node("button", "Add evidence", "primary"); button.onclick = () => view("evidence"); empty.append(button); container.append(empty);
   }
   for (const note of notes) {
-    const asset = state.assets.find(a => a.id === note.asset_id);
+    const asset = boundAsset(note, state.assets.find(a => a.id === note.asset_id));
     const card = node("div", undefined, "note-card" + (note.id === focused ? " selected" : ""));
     const checkbox = node("input"); checkbox.type = "checkbox"; checkbox.className = "select-note"; checkbox.checked = selected.has(note.id);
     checkbox.setAttribute("aria-label", `Select ${note.generated.title} for export`);
@@ -107,37 +114,77 @@ function renderNotes() {
   selectionCount();
 }
 function selectionCount() { $("selection-count").textContent = `${selected.size} note(s) selected`; }
-function renderDetail(note, asset) {
-  const detail = $("detail"); detail.replaceChildren();
-  const head = node("div", undefined, "detail-head"); head.append(node("span", note.state, `badge ${note.state}`), node("h2", note.generated.title)); detail.append(head);
-  const body = node("div", undefined, "detail-body");
+function boundAsset(note, asset) {
+  return {...asset, prepared: note.evidence?.prepared || null, transcript: note.evidence?.transcript || null,
+    evidence_id: note.evidence?.id, provenance: note.evidence?.provenance || "unavailable"};
+}
+function mediaURL(asset, filename) {
+  const suffix = asset.evidence_id ? `?evidence=${encodeURIComponent(asset.evidence_id)}` : "";
+  return `/media/${asset.id}/${encodeURIComponent(filename)}` + suffix;
+}
+function renderTranscript(body, asset) {
+  const chunks = asset.transcript?.chunks || [];
+  body.append(node("h3", "Original transcript"));
+  if (!chunks.length) body.append(node("p", "No completed transcript is available for this evidence revision.", "small"));
+  chunks.forEach(c => body.append(node("p", `[${c.start.toFixed(1)}–${c.end.toFixed(1)}s, coarse chunk range]\n${c.text}`, "transcript")));
+}
+function renderEvidence(body, asset) {
+  if (asset.provenance && asset.provenance !== "bound") body.append(node("p", "Legacy input association is unverified. Earlier generation inputs could not be recovered.", "file-error"));
   const images = asset.prepared?.images || [];
   if (images.length) {
-    const main = node("img"); main.className = "evidence-image"; main.src = `/media/${asset.id}/${images[0].file}`; main.alt = "Original evidence preview"; body.append(main);
+    const main = node("img"); main.className = "evidence-image"; main.src = mediaURL(asset, images[0].file); main.alt = "Original evidence preview"; body.append(main);
     const strip = node("div", undefined, "image-strip");
     for (const image of images) {
-      const button = node("button"); const thumb = node("img"); thumb.src = `/media/${asset.id}/${image.file}`; thumb.alt = image.seconds === null ? "Photo" : `Frame at ${image.seconds} seconds`;
+      const button = node("button"); const thumb = node("img"); thumb.src = mediaURL(asset, image.file); thumb.alt = image.seconds === null ? "Photo" : `Frame at ${image.seconds} seconds`;
       button.append(thumb, node("span", image.seconds === null ? "Photo" : `${image.seconds}s`)); button.onclick = () => { main.src = thumb.src; main.alt = thumb.alt; }; strip.append(button);
     }
     body.append(strip);
   }
-  const source = node("p", undefined, "source-label"); const link = node("a", asset.name); link.href = `/media/${asset.id}/original`; link.target = "_blank"; link.rel = "noopener"; source.append("Original: ", link, node("br"), captureLabel(asset)); body.append(source);
-  if (asset.prepared?.kind !== "photo") {
-    const player = node(asset.prepared?.kind === "video" ? "video" : "audio"); player.controls = true; player.src = link.href; player.preload = "metadata"; body.append(player);
+  const source = node("p", undefined, "source-label"); const link = node("a", asset.name); link.href = mediaURL(asset, "original"); link.target = "_blank"; link.rel = "noopener"; source.append("Original: ", link, node("br"), captureLabel(asset)); body.append(source);
+  const kind = asset.prepared?.kind || (/\.(jpe?g|png|webp)$/i.test(asset.name) ? "photo" : /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(asset.name) ? "video" : "audio");
+  if (kind !== "photo") {
+    const player = node(kind === "video" ? "video" : "audio"); player.controls = true; player.src = link.href; player.preload = "metadata"; body.append(player);
+  } else if (!images.length) {
+    const original = node("img"); original.className = "evidence-image"; original.src = link.href; original.alt = "Original source photo"; body.append(original);
   }
+}
+function renderDetail(note, currentAsset) {
+  const session = ++detailSession;
+  let editGeneration = 0;
+  const asset = boundAsset(note, currentAsset);
+  const detail = $("detail"); detail.replaceChildren();
+  const head = node("div", undefined, "detail-head"); head.append(node("span", note.state, `badge ${note.state}`), node("h2", note.generated.title)); detail.append(head);
+  const body = node("div", undefined, "detail-body");
+  renderEvidence(body, asset);
   body.append(node("h3", "Observation note"));
   const label = node("label", "Edit the note before using it in your report"); label.htmlFor = "note-editor"; body.append(label);
   const editor = node("textarea"); editor.id = "note-editor"; editor.rows = 6; editor.value = note.note; body.append(editor);
   const status = node("p", "Draft text is AI-generated. Your changes are saved only when you select Save.", "save-status"); body.append(status);
-  editor.oninput = () => { dirty = true; status.textContent = "Unsaved changes"; };
+  const changed = () => { editGeneration++; dirty = true; status.textContent = "Unsaved changes"; };
+  editor.oninput = changed;
   const reviewer = node("input"); reviewer.placeholder = "Reviewer name"; reviewer.setAttribute("aria-label", "Reviewer name"); reviewer.value = note.reviewer || "";
   const reviewed = node("input"); reviewed.type = "checkbox"; reviewed.checked = note.state === "reviewed";
   const reviewedLabel = node("label", " Reviewed"); reviewedLabel.prepend(reviewed);
   const row = node("div", undefined, "review-row"); row.append(reviewer, reviewedLabel); body.append(row);
-  reviewer.oninput = reviewed.onchange = () => { dirty = true; status.textContent = "Unsaved changes"; };
+  reviewer.oninput = reviewed.onchange = changed;
   const save = node("button", "Save note", "primary"); save.onclick = () => action(async () => {
-    const result = await api("/api/edit", {id: note.id, revision: note.revision, note: editor.value, state: reviewed.checked ? "reviewed" : "draft", reviewer: reviewer.value});
-    dirty = false; await refresh(); renderDetail(result, state.assets.find(a => a.id === result.asset_id)); message("Note saved. The original AI draft and previous edits are preserved.");
+    const submittedGeneration = editGeneration;
+    const snapshot = {id: note.id, revision: note.revision, note: editor.value, state: reviewed.checked ? "reviewed" : "draft", reviewer: reviewer.value};
+    save.disabled = true;
+    try {
+      const result = await api("/api/edit", snapshot);
+      // Update the revision token without touching any newer text or another editor.
+      note.revision = result.revision;
+      await refresh();
+      if (session === detailSession && focused === note.id) {
+        if (editGeneration === submittedGeneration) {
+          dirty = false; renderDetail(result, state.assets.find(a => a.id === result.asset_id));
+        } else {
+          dirty = true; status.textContent = "Earlier edit saved. Your newer changes are still unsaved.";
+        }
+      }
+      message(`Note saved: ${result.generated.title} (revision ${result.revision}). The original draft and previous edits are preserved.`);
+    } finally { save.disabled = false; }
   }); body.append(save);
   for (const [heading, values] of [["Follow-up", note.generated.follow_ups], ["Open questions", note.generated.open_questions]]) {
     if (values.length) { body.append(node("h3", heading)); const list = node("ul"); values.forEach(v => list.append(node("li", v))); body.append(list); }
@@ -147,8 +194,7 @@ function renderDetail(note, asset) {
     const item = node("div", claim.text, "claim"); item.append(node("small", `${claim.basis.replaceAll("_", " ")} · ${claim.evidence.map(e => e.source_id).join(", ")}`));
     for (const reference of claim.evidence) if (reference.quote) item.append(node("p", `“${reference.quote}”`)); body.append(item);
   }
-  const chunks = asset.transcript?.chunks || [];
-  if (chunks.length) { body.append(node("h3", "Original transcript")); chunks.forEach(c => body.append(node("p", `[${c.start.toFixed(1)}–${c.end.toFixed(1)}s, coarse chunk range]\n${c.text}`, "transcript"))); }
+  renderTranscript(body, asset);
   const history = node("button", "View previous saved revisions", "text-button"); history.onclick = () => action(async () => {
     const revisions = await api(`/api/history/${note.id}`); const panel = node("div");
     revisions.forEach(r => panel.append(node("h3", `Revision ${r.revision} · ${r.state}`), node("p", r.note, "transcript")));
@@ -165,6 +211,12 @@ function renderFiles() {
     const row = node("div", undefined, "file-row"), information = node("div");
     information.append(node("div", asset.name, "file-name"), node("div", `${asset.state} · ${captureLabel(asset)}`, "file-state"));
     if (asset.error) information.append(node("p", asset.error, "file-error")); row.append(information);
+    const open = node("button", "Review source", "secondary"); open.setAttribute("aria-label", `Review source ${asset.name}`);
+    open.onclick = () => {
+      const body = $("source-detail"); body.hidden = false; body.replaceChildren(node("h2", asset.name), node("p", `Processing state: ${asset.state}`, "small"));
+      if (asset.error) body.append(node("p", asset.error, "file-error"));
+      renderEvidence(body, asset); renderTranscript(body, asset); body.scrollIntoView({block: "start", behavior: "smooth"});
+    }; row.append(open);
     if (["error", "interrupted", "ready"].includes(asset.state)) {
       const retry = node("button", asset.state === "ready" ? "Update draft" : "Retry explicitly", "text-button"); retry.disabled = state.progress.running;
       retry.onclick = () => action(async () => { await api("/api/process", {asset_ids: [asset.id]}); message("Processing requested. Unchanged completed stages will be reused."); await refresh(); }); row.append(retry);

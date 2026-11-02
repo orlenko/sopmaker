@@ -13,6 +13,8 @@ from zoneinfo import ZoneInfo
 from .media import SUPPORTED
 from .models import note_text
 
+MAX_FILE_BYTES = 1024 * 1024 * 1024
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -31,7 +33,7 @@ class Store:
         self.path = self.root / "inspection.sqlite3"
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise ValueError("This workspace needs a newer Sopmaker version.")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -54,8 +56,28 @@ class Store:
                     created_at TEXT NOT NULL, response TEXT NOT NULL);
                 CREATE VIRTUAL TABLE IF NOT EXISTS observation_search USING fts5(
                     observation_id UNINDEXED, text, tokenize='unicode61');
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS evidence_revisions (
+                    id TEXT PRIMARY KEY, asset_id TEXT NOT NULL REFERENCES assets(id),
+                    created_at TEXT NOT NULL, prepared TEXT, transcript TEXT,
+                    provenance TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS transcript_chunks (
+                    revision_id TEXT NOT NULL, asset_id TEXT NOT NULL REFERENCES assets(id),
+                    chunk_index INTEGER NOT NULL, payload TEXT NOT NULL,
+                    PRIMARY KEY(revision_id, chunk_index));
             """)
+            db.execute("BEGIN IMMEDIATE")
+            if version < 2:
+                db.execute("ALTER TABLE observations ADD COLUMN evidence_id TEXT REFERENCES evidence_revisions(id)")
+                # Existing data may already have lost its historical association in version 1.
+                # Preserve what is available; never claim that migration recovered old inputs.
+                for asset in db.execute("SELECT * FROM assets").fetchall():
+                    eid = "e_" + uuid.uuid4().hex
+                    db.execute("INSERT INTO evidence_revisions VALUES(?,?,?,?,?,?)",
+                               (eid, asset["id"], now(), asset["prepared"], asset["transcript"], "legacy_unverified"))
+                    db.execute("UPDATE observations SET evidence_id=? WHERE asset_id=?", (eid, asset["id"]))
+                for row in db.execute("SELECT * FROM observations").fetchall():
+                    self._index(db, row["id"], row["asset_id"], json.loads(row["generated"]), row["note"])
+                db.execute("PRAGMA user_version=2")
             for key, value in self.defaults().items():
                 db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
             # A previous process may have stopped during an API call. Never retry it automatically.
@@ -118,6 +140,8 @@ class Store:
     def import_file(self, source: Path, display_name: str | None = None) -> bool:
         if source.suffix.lower() not in SUPPORTED:
             raise ValueError("Unsupported file type.")
+        if source.stat().st_size > MAX_FILE_BYTES:
+            raise ValueError("Files must not exceed 1 GB.")
         with source.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         asset_id = "a_" + digest[:24]
@@ -129,6 +153,8 @@ class Store:
             temporary = (self.root / relative).with_suffix(".importing")
             try:
                 shutil.copyfile(source, temporary)
+                if temporary.stat().st_size > MAX_FILE_BYTES:
+                    raise ValueError("Files must not exceed 1 GB.")
                 with temporary.open("rb") as stream:
                     if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
                         raise ValueError("File changed during import; try it again.")
@@ -169,23 +195,28 @@ class Store:
 
     def add_drafts(self, asset_id: str, drafts: list[dict], response: dict, fingerprint: str) -> None:
         with self.connect() as db:
+            eid = "e_" + uuid.uuid4().hex
+            asset = db.execute("SELECT prepared,transcript FROM assets WHERE id=?", (asset_id,)).fetchone()
+            db.execute("INSERT INTO evidence_revisions VALUES(?,?,?,?,?,?)",
+                       (eid, asset_id, now(), asset["prepared"], asset["transcript"], "bound"))
             db.execute("INSERT INTO runs VALUES(?,?,?,?)",
-                       (uuid.uuid4().hex, asset_id, now(), json.dumps(response)))
+                       (eid, asset_id, now(), json.dumps(response)))
             # Preserve all prior notes; archive earlier unreviewed drafts instead of overwriting.
             db.execute("UPDATE observations SET archived=1 WHERE asset_id=? AND state='draft'",
                        (asset_id,))
             for draft in drafts:
                 oid = "o_" + uuid.uuid4().hex
                 text = note_text(draft)
-                db.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,0)",
-                           (oid, asset_id, json.dumps(draft), text, "draft", 1, now(), None))
+                db.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,0,?)",
+                           (oid, asset_id, json.dumps(draft), text, "draft", 1, now(), None, eid))
                 self._index(db, oid, asset_id, draft, text)
             db.execute("UPDATE assets SET state='ready', error=NULL, fingerprint=? WHERE id=?",
                        (fingerprint, asset_id))
 
     @staticmethod
     def _index(db, oid, asset_id, draft, text):
-        asset = db.execute("SELECT name,transcript FROM assets WHERE id=?", (asset_id,)).fetchone()
+        asset = db.execute("SELECT a.name,e.transcript FROM assets a JOIN observations o ON o.asset_id=a.id "
+                           "LEFT JOIN evidence_revisions e ON e.id=o.evidence_id WHERE o.id=?", (oid,)).fetchone()
         searchable = " ".join([asset["name"], asset["transcript"] or "", json.dumps(draft), text])
         db.execute("DELETE FROM observation_search WHERE observation_id=?", (oid,))
         db.execute("INSERT INTO observation_search VALUES(?,?)", (oid, searchable))
@@ -204,14 +235,40 @@ class Store:
         if not include_archived:
             sql += " AND o.archived=0"
         with self.connect() as db:
-            result = [self._observation(row) for row in db.execute(sql + " ORDER BY o.updated_at,o.id", params)]
+            result = [self._observation(row, db) for row in db.execute(sql + " ORDER BY o.updated_at,o.id", params)]
         return result
 
     @staticmethod
-    def _observation(row) -> dict:
+    def _observation(row, db) -> dict:
         result = dict(row)
         result["generated"] = json.loads(result["generated"])
+        evidence = db.execute("SELECT * FROM evidence_revisions WHERE id=?", (row["evidence_id"],)).fetchone()
+        result["evidence"] = Store._evidence(evidence) if evidence else None
         return result
+
+    @staticmethod
+    def _evidence(row) -> dict:
+        result = dict(row)
+        for key in ("prepared", "transcript"):
+            result[key] = json.loads(result[key]) if result[key] else None
+        return result
+
+    def evidence(self, evidence_id: str, asset_id: str) -> dict:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM evidence_revisions WHERE id=? AND asset_id=?", (evidence_id, asset_id)).fetchone()
+        if not row:
+            raise ValueError("Unknown evidence revision.")
+        return self._evidence(row)
+
+    def cached_chunks(self, revision_id: str) -> list[dict]:
+        with self.connect() as db:
+            return [json.loads(row[0]) for row in db.execute(
+                "SELECT payload FROM transcript_chunks WHERE revision_id=? ORDER BY chunk_index", (revision_id,))]
+
+    def cache_chunk(self, revision_id: str, asset_id: str, index: int, chunk: dict) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO transcript_chunks VALUES(?,?,?,?)",
+                       (revision_id, asset_id, index, json.dumps(chunk)))
 
     def edit(self, oid: str, revision: int, note: str, state: str, reviewer: str) -> dict:
         if state not in ("draft", "reviewed") or not isinstance(note, str) or len(note) > 30000:
@@ -230,7 +287,7 @@ class Store:
             db.execute("UPDATE observations SET note=?,state=?,reviewer=?,revision=revision+1,updated_at=? WHERE id=?",
                        (note, state, reviewer.strip() or None, now(), oid))
             self._index(db, oid, row["asset_id"], json.loads(row["generated"]), note)
-            return self._observation(db.execute("SELECT * FROM observations WHERE id=?", (oid,)).fetchone())
+            return self._observation(db.execute("SELECT * FROM observations WHERE id=?", (oid,)).fetchone(), db)
 
     def history(self, oid: str) -> list[dict]:
         with self.connect() as db:

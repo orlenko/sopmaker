@@ -10,7 +10,8 @@ media preparation and external AI APIs. No hosted service or separate FFmpeg
 installation is needed. The local browser interface supports file/folder
 import, per-file processing, search, source review, note edits and revision
 history, and selected-note exports to Word, CSV, JSON, and a portable HTML
-evidence index with originals.
+evidence index with originals. Every source file can be opened independently,
+including files with no generated observation or incomplete processing.
 
 ## Run from source
 
@@ -58,6 +59,14 @@ observations to export. The ZIP contains editable `notes.docx`, an evidence
 `index.html`, original media, previews, CSV, and JSON. Extract it before opening
 the index. Editing a note preserves the original AI claims and previous saved
 revisions; reprocessing keeps reviewed notes and archives prior unreviewed drafts.
+Each note retains its own preparation and transcript evidence revision, including
+after a different model is used or a later attempt fails. Version 1 workspaces
+are upgraded automatically; older notes are visibly marked when their original
+input association cannot be verified. Such lost history cannot be recovered
+by copying the latest transcript. See the [evidence and editor decisions](docs/evidence-and-editor-decisions.md).
+
+Separate workspaces may be open concurrently in the same browser. Each local
+server has its own session cookie, so source and download links remain usable.
 
 ## Testing and portable Windows builds
 

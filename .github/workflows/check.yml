@@ -26,6 +26,7 @@ jobs:
       - run: uv run pytest
       - run: uv run playwright install --with-deps chromium
       - run: uv run python scripts/browser_smoke.py
+      - run: uv run python scripts/browser_regressions.py
       - name: Exercise isolated Windows credential storage
         if: runner.os == 'Windows'
         shell: pwsh
