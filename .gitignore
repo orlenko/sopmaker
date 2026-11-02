@@ -15,5 +15,6 @@ dist/
 /workspaces/
 /data/
 /exports/
+/local-test-data/
 *.sqlite3
 *.sqlite3-*

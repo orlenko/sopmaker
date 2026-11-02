@@ -47,7 +47,7 @@ def validate_evidence(batch: DraftBatch, sources: dict[str, dict]) -> None:
                 expected = "transcript" if claim.basis == "inspector_narration" else "image"
                 if source["kind"] != expected:
                     raise ValueError("The model cited an incompatible source type.")
-                if claim.basis == "inspector_narration" and not reference.quote:
+                if claim.basis == "inspector_narration" and (not reference.quote or not reference.quote.strip()):
                     raise ValueError("A narration claim needs a supporting transcript quote.")
                 if reference.quote is not None:
                     if source["kind"] != "transcript" or reference.quote not in source["text"]:
