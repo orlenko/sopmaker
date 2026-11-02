@@ -187,6 +187,8 @@ def test_loopback_auth_origin_upload_range_and_key_redaction(store, photo):
             result = request("/api/state").read()
             assert b"invented-test-credential" not in result
             assert json.loads(result)["credentials"]["configured"]
+            with request("/app.js") as script:
+                assert script.headers["Content-Type"] == "application/javascript"
             request("/api/files?name=synthetic.png", photo.read_bytes(), method="PUT").close()
             aid = store.assets()[0]["id"]
             partial = request(f"/media/{aid}/original", Range="bytes=0-9")

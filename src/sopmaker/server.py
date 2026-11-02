@@ -99,7 +99,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.command == "GET" and path.path in ("/", "/app.js", "/style.css"):
                 name = "index.html" if path.path == "/" else path.path[1:]
-                return self._send(200, (WEB / name).read_bytes(), mimetypes.guess_type(name)[0] or "text/plain")
+                mime = {"index.html": "text/html", "app.js": "application/javascript", "style.css": "text/css"}[name]
+                return self._send(200, (WEB / name).read_bytes(), mime)
             if not self._authorized():
                 return self._send(403, {"error": "Open this window from the Sopmaker launcher to start a session."})
             if self.command == "GET":

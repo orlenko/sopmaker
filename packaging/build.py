@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
                     "--name", "Sopmaker", "--collect-all", "sopmaker", "--collect-all", "av",
+                    "--collect-all", "openai", "--copy-metadata", "keyring",
                     "--collect-all", "tzdata", "--collect-submodules", "keyring.backends",
                     "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"),
                     "--specpath", str(ROOT / "build"), str(ROOT / "packaging" / "desktop.py")], check=True)

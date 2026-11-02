@@ -67,11 +67,13 @@ def main():
                     page.locator("#file-picker").set_input_files(str(upload))
                     expect(page.get_by_role("status")).to_contain_text("Imported 1 file(s) locally")
                     expect(page.locator(".file-row")).to_have_count(2)
+                    page.get_by_role("searchbox", name="Search source files").fill("another-synthetic")
+                    expect(page.locator(".file-row")).to_have_count(1)
                     page.set_viewport_size({"width": 600, "height": 900})
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     assert not errors, errors
                     browser.close()
-                    print("Browser review, search, key setup, local import, export and narrow-layout checks passed.")
+                    print("Browser review, note/source search, key setup, local import, export and narrow-layout checks passed.")
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

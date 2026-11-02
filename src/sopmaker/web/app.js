@@ -158,7 +158,10 @@ function renderDetail(note, asset) {
 function renderFiles() {
   const list = $("files-list"); list.replaceChildren();
   if (!state.assets.length) list.append(node("p", "No source files imported yet."));
-  for (const asset of state.assets) {
+  const needle = $("file-search").value.trim().toLocaleLowerCase();
+  const assets = state.assets.filter(asset => !needle || (asset.name + " " + (asset.transcript?.chunks || []).map(chunk => chunk.text).join(" ")).toLocaleLowerCase().includes(needle));
+  if (needle && !assets.length) list.append(node("p", "No matching source files or narration."));
+  for (const asset of assets) {
     const row = node("div", undefined, "file-row"), information = node("div");
     information.append(node("div", asset.name, "file-name"), node("div", `${asset.state} · ${captureLabel(asset)}`, "file-state"));
     if (asset.error) information.append(node("p", asset.error, "file-error")); row.append(information);
@@ -187,6 +190,7 @@ $("export").onclick = () => action(async () => {
 });
 $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => action(refresh), 250); };
 $("state-filter").onchange = () => renderNotes(); $("show-archived").onchange = () => action(refresh);
+$("file-search").oninput = () => renderFiles();
 window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
 action(async () => { await api("/api/session", {}); await refresh(); if (!state.credentials.configured && !state.assets.length) view("setup"); });
 setInterval(() => { if (state?.progress.running && !importing) action(refresh); }, 2000);

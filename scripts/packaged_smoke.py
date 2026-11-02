@@ -31,7 +31,7 @@ def main():
                 deadline = time.monotonic() + 40
                 url = None
                 while time.monotonic() < deadline:
-                    text = log.read_text(encoding="utf-8")
+                    text = log.read_text(encoding="utf-8", errors="replace")
                     for line in text.splitlines():
                         if line.startswith("Open: "):
                             url = line.removeprefix("Open: ")
