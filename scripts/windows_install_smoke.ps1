@@ -141,3 +141,6 @@ exit $LASTEXITCODE
 } finally {
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
+# Expected refusal commands leave LASTEXITCODE=1. Signal success only after
+# every assertion AND cleanup succeeds; terminating failures never reach here.
+exit 0
