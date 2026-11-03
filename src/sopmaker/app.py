@@ -53,10 +53,9 @@ def main(argv=None):
     root.mkdir(parents=True, exist_ok=True)
     lock = FileLock(root / ".sopmaker.lock")
     try:
-        with lock.acquire(timeout=0):
+        with lock.acquire(timeout=0), Diagnostics(log_directory(), console=True) as diagnostics:
             store = Store(root)
             credentials = Credentials()
-            diagnostics = Diagnostics(log_directory(), console=True)
             diagnostics.emit("app_started")
             engine = Engine(store, credentials, diagnostics=diagnostics)
             if args.command == "import":

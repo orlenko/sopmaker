@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 import uuid
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -273,6 +274,11 @@ def test_diagnostics_redaction_rotation_and_write_failure(tmp_path):
     for _ in range(30):
         diagnostics.emit("stage_started", stage="drafting", model="invented-secret-as-model",
                          request_id="req_bad\nprivate narration", note="private note", path="private path")
+    deadline = time.monotonic() + 3
+    while diagnostics.pending.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert diagnostics.pending.unfinished_tasks == 0
+    diagnostics.close()
     files = list(logs.glob("*.jsonl"))
     assert len(files) == 3 and all(f.stat().st_size <= 400 for f in files)
     output = json.dumps(diagnostics.download()) + "".join(f.read_text() for f in files)
@@ -284,7 +290,78 @@ def test_diagnostics_redaction_rotation_and_write_failure(tmp_path):
     blocked.write_text("invented")
     failed = Diagnostics(blocked)
     failed.emit("run_started", total=1)
+    failed.close()
     assert failed.info()["write_failed"] and len(failed.download()["events"]) == 1
+
+
+def test_blocked_diagnostic_sink_cannot_stall_work_cancel_or_next_admission(store, photo, tmp_path, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked_write(self, line):
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(Diagnostics, "_write", blocked_write)
+    diagnostics = Diagnostics(tmp_path / "logs")
+    diagnostics.emit("app_started")
+    assert entered.wait(2)
+    store.import_file(photo)
+    engine = engine_for(store, diagnostics=diagnostics)
+    try:
+        engine.start(generate_report=True)
+        engine.thread.join(2)
+        assert engine.progress["state"] == "completed" and not engine.lock.locked()
+        drafting, finish_draft = threading.Event(), threading.Event()
+
+        class Held(ReportProvider):
+            def draft(self, sources, *_):
+                drafting.set()
+                assert finish_draft.wait(2)
+                return super().draft(sources)
+
+        store.save_settings({"context": "explicit fresh processing"})
+        engine.provider_factory = Held
+        engine.start(asset_ids=[store.assets()[0]["id"]], generate_report=True)
+        assert drafting.wait(2)
+        engine.stop(engine.progress["run_id"])
+        finish_draft.set()
+        engine.thread.join(2)
+        assert engine.progress["state"] == "cancelled" and not engine.lock.locked()
+        engine.start(asset_ids=[store.assets()[0]["id"]])
+        engine.thread.join(2)
+        assert engine.progress["state"] == "completed"
+        for _ in range(500):
+            diagnostics.emit("waiting", elapsed_s=1)
+        assert diagnostics.pending.qsize() == diagnostics.pending.maxsize == 128
+        data = diagnostics.download()
+        assert len(data["events"]) == 300 and data["dropped_events"] > 0 and data["log_write_failed"]
+        assert [t for t in threading.enumerate() if t is diagnostics.writer] == [diagnostics.writer]
+        started = time.monotonic()
+        diagnostics.close(timeout=0.01)
+        assert time.monotonic() - started < 0.3
+        remaining = diagnostics.pending.qsize()
+        diagnostics.emit("waiting")
+        assert diagnostics.pending.qsize() == remaining  # No consumer restart after close.
+    finally:
+        release.set()
+        diagnostics.close()
+        diagnostics.writer.join(2)
+    assert not diagnostics.writer.is_alive()
+
+
+def test_diagnostic_thread_start_failure_stays_memory_only(tmp_path, monkeypatch):
+    def fail_start(_):
+        raise RuntimeError("invented startup failure")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+    diagnostics = Diagnostics(tmp_path / "logs")
+    diagnostics.emit("app_started")
+    diagnostics.close()
+    diagnostics.close()
+    result = diagnostics.download()
+    assert diagnostics.writer is None and diagnostics.pending.qsize() == 0
+    assert result["log_write_failed"] and result["dropped_events"] == 1
+    assert result["events"][0]["event"] == "app_started"
 
 
 def test_diagnostic_and_receipt_routes_require_current_session(store):

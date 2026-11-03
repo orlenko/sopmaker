@@ -89,8 +89,20 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         await expect(page.locator("#worker-status")).to_have_text("Preparing the report ZIP")
 
         await page.get_by_role("button", name="Review notes", exact=False).first.click()
+        selected_box = page.get_by_label("Select Synthetic example: cabinet label for export", exact=True)
+        await selected_box.focus()
+        original_checkbox = await selected_box.element_handle()
+        await page.evaluate("refresh()")
+        await expect(selected_box).to_be_focused()
+        assert await original_checkbox.evaluate("el => el.isConnected")
+        opener = page.get_by_role("button", name="Synthetic example: cabinet label", exact=False)
+        await opener.focus()
+        await page.evaluate("refresh()")
+        await expect(opener).to_be_focused()
+        await opener.press("Enter")
         await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
         editor = page.get_by_label("Edit the note before using it in your report")
+        await expect(editor).to_be_focused()
         await editor.fill("Unsaved fixture correction while report is packaging")
         await page.evaluate("refresh()")
         await expect(editor).to_have_value("Unsaved fixture correction while report is packaging")
@@ -110,9 +122,10 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
         for width, height in ((1366, 768), (1093, 614), (1024, 640), (600, 900)):
             await page.set_viewport_size({"width": width, "height": height})
-            await page.locator("#detail").scroll_into_view_if_needed()
+            await page.locator("#detail").evaluate("el => el.scrollIntoView({block: 'start'})")
             assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             assert await page.locator("#detail textarea").evaluate("el => el.getBoundingClientRect().width >= 200")
+            assert await page.get_by_role("button", name="Save note", exact=True).evaluate("el => el.getBoundingClientRect().bottom <= document.querySelector('main').getBoundingClientRect().bottom")
         await page.set_viewport_size({"width": 1366, "height": 768})
 
         # A start is accepted by the server but its acknowledgement is lost.
@@ -178,8 +191,77 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         text = output.read_text()
         assert "invented-lifecycle-key" not in text and server.token not in text and "second.png" not in text
         assert json.loads(text)["events"]
+        await check_late_ack(page, engine, root, calls)
         assert not errors, errors
         await browser.close()
+
+
+async def check_late_ack(page, engine, root, calls):
+    # A's reply must not mutate B's pending identity, preview or starting state.
+    first, second = root / "late-ack-a.png", root / "late-ack-b.png"
+    Image.new("RGB", (35, 35), "purple").save(first)
+    Image.new("RGB", (35, 35), "yellow").save(second)
+    await page.get_by_role("button", name="Add files", exact=False).first.click()
+    await page.locator("#file-picker").set_input_files(str(first))
+    await expect(page.locator("#message")).to_contain_text("Imported 1")
+    await page.get_by_role("button", name="Generate report", exact=False).first.click()
+    await expect(page.locator("#batch-files")).to_contain_text(first.name)
+    await expect(page.locator("#batch-files")).not_to_contain_text("second.png")
+    held_a, send_a, delivered_a, held_b, abort_b, delivered_b = (asyncio.Event() for _ in range(6))
+    requests = []
+
+    async def reorder(route):
+        requests.append(route.request.post_data_json)
+        if len(requests) == 1:
+            response = await route.fetch()
+            body = await response.body()
+            held_a.set()
+            await send_a.wait()
+            await route.fulfill(response=response, body=body)
+            delivered_a.set()
+        else:
+            held_b.set()
+            await abort_b.wait()
+            await route.abort()
+            delivered_b.set()
+
+    await page.route("**/api/process", reorder)
+    try:
+        await page.get_by_role("button", name="Generate draft report", exact=True).click()
+        await asyncio.wait_for(held_a.wait(), 5)
+        await asyncio.to_thread(engine.thread.join, 5)
+        await page.evaluate("refresh()")
+        await expect(page.locator("#worker-status")).to_have_text("Your draft report is ready")
+        await page.get_by_role("button", name="Add files", exact=False).first.click()
+        await page.locator("#file-picker").set_input_files(str(second))
+        await expect(page.locator("#message")).to_contain_text("Imported 1")
+        await page.get_by_role("button", name="Generate report", exact=False).first.click()
+        await expect(page.locator("#batch-files")).to_contain_text(second.name)
+        await expect(page.locator("#batch-files")).not_to_contain_text(first.name)
+        await expect(page.locator("#report-result h2")).to_contain_text("Previous run")
+        await page.get_by_role("button", name="Generate draft report", exact=True).click()
+        await asyncio.wait_for(held_b.wait(), 5)
+        pending_b = await page.evaluate("JSON.parse(sessionStorage.getItem('sopmaker-pending-run')).runId")
+        before = len(calls)
+        send_a.set()
+        await asyncio.wait_for(delivered_a.wait(), 5)
+        await expect(page.locator("#worker-status")).to_have_text("Starting…")
+        await expect(page.locator("#generate-report")).to_be_disabled()
+        assert await page.evaluate("JSON.parse(sessionStorage.getItem('sopmaker-pending-run')).runId") == pending_b
+        await expect(page.locator("#batch-files")).to_contain_text(second.name)
+        abort_b.set()
+        await asyncio.wait_for(delivered_b.wait(), 5)
+        await expect(page.locator("#message")).to_contain_text("not confirmed")
+        await page.reload()
+        await expect(page.locator("#worker-status")).to_have_text("Still waiting for confirmation")
+        assert await page.evaluate("JSON.parse(sessionStorage.getItem('sopmaker-pending-run')).runId") == pending_b
+        assert len(calls) == before
+        await page.get_by_role("button", name="Generate report", exact=False).first.click()
+        await expect(page.locator("#generate-report")).to_be_disabled()
+    finally:
+        send_a.set()
+        abort_b.set()
+        await page.unroute("**/api/process", reorder)
 
 
 def main():

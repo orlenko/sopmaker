@@ -43,7 +43,12 @@ export/provider-close/thread-start failures, preserved saved model choices,
 effective request-policy cache invalidation, authenticated diagnostics/receipts,
 redaction of custom model/error/request text, rotation, failed log writes, CLI
 stdout compatibility, same-ID concurrent admission replay, stale new-file
-eligibility and a completion between database/status reads.
+eligibility and a completion between database/status reads. A controlled blocked
+sink verifies successful/cancelled work, next admission, memory download, bounded
+queue/drop accounting and bounded close without thread growth; sink-start failure
+also stays nonfatal. Browser checks retain the next batch preview and focus across
+polls, and hold an old acknowledgement while a newer request remains unadmitted
+and survives reload.
 Fake-client checks bind exact Sol/Terra reasoning/output options and legacy/custom
 compatibility. These use invented media and fake providers, not live model probes.
 

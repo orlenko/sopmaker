@@ -7,6 +7,7 @@ const node = (tag, text, className) => {
   return element;
 };
 let state, focused, dirty = false, searchTimer, importing = false, detailSession = 0;
+let lastNoteSignature, lastFileSignature;
 const selected = new Set();
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.has("token")) sessionStorage.setItem("sopmaker-token", hash.get("token"));
@@ -104,7 +105,7 @@ function readPending() {
     return value && /^[a-f0-9]{32}$/.test(value.runId) && /^[a-f0-9]{32}$/.test(value.instanceId) && Number.isFinite(value.clickedAt) ? value : null;
   } catch { return null; }
 }
-let pendingRun = readPending(), startInFlight = false, cancelInFlight = false, connectionLost = false;
+let pendingRun = readPending(), startInFlight = null, cancelInFlight = false, connectionLost = false;
 let activeView = "notes", refreshId = 0, appliedRefresh = 0, polling = false;
 function keepPending(value) {
   pendingRun = value;
@@ -136,6 +137,7 @@ function renderRun() {
   if (!state) return;
   const p = state.progress, uncertain = !!pendingRun, busy = locked();
   const newFiles = state.assets.filter(a => a.state === "imported");
+  const showNextBatch = !p.running && !uncertain && newFiles.length > 0;
   const phases = {
     starting: ["Starting processing", "Sopmaker accepted the run. Preparing to process the captured batch."],
     preparing: ["Preparing media", "Reading capture metadata and preparing images or audio on this device."],
@@ -148,7 +150,7 @@ function renderRun() {
   let title, detail, kind = "idle";
   if (uncertain) {
     const restarted = p.instance_id !== pendingRun.instanceId;
-    title = restarted ? "App restarted before the request was confirmed" : Date.now() - pendingRun.clickedAt < 30000 && startInFlight ? "Starting…" : "Still waiting for confirmation";
+    title = restarted ? "App restarted before the request was confirmed" : Date.now() - pendingRun.clickedAt < 30000 && startInFlight === pendingRun.runId ? "Starting…" : "Still waiting for confirmation";
     detail = restarted ? "Previous run status cannot be recovered in this app session. Review saved notes and source files before explicitly retrying." : "The request may have started. Nothing has been resubmitted. Check status; keep Sopmaker open.";
     kind = "busy";
   } else if (connectionLost) {
@@ -188,6 +190,12 @@ function renderRun() {
     title = newFiles.length ? `${newFiles.length} new file(s) ready to process` : "Ready. Nothing is running.";
     detail = newFiles.length ? "Generate a draft report when you are ready. Nothing is processing yet." : "Add inspection fragments to begin, or review saved notes.";
   }
+  const resultTitle = title, resultDetail = detail, resultKind = kind;
+  if (showNextBatch && !connectionLost && p.state === "completed") {
+    title = `${newFiles.length} new file(s) ready to process`;
+    detail = "These new files have not been processed. The previous run's result remains available on Generate report.";
+    kind = "idle";
+  }
   $("status-strip").className = `status-strip ${kind}`;
   setText("worker-status", title); setText("status-detail", detail);
   setText("status-icon", kind === "ready" ? "✓" : kind === "failed" ? "!" : kind === "cancelled" ? "‖" : "○");
@@ -206,14 +214,14 @@ function renderRun() {
   $("generate-report").setAttribute("aria-busy", String(busy));
   $("generate-report").textContent = busy ? uncertain ? "Starting…" : "Working…" : "Generate draft report";
   setText("generate-hint", busy ? "This run is locked against repeat submissions. You can review saved notes while waiting." : !state.credentials.configured ? "Add your API key in Setup before generating." : newFiles.length ? `One click starts work on ${newFiles.length} new file(s).` : "Add new files, or explicitly retry individual files in Add files.");
-  setText("batch-headline", p.running || uncertain ? `Current batch: ${p.total || newFiles.length} file(s)` : `${newFiles.length} new file(s) to process`);
+  setText("batch-headline", p.running || uncertain ? `Current batch: ${uncertain ? pendingRun.assetIds?.length || newFiles.length : p.total} file(s)` : `${newFiles.length} new file(s) to process`);
   setText("model-summary", `Notes model for future processing: ${modelName(state.settings.vision_model)}.`);
   setText("run-badge", busy ? "Working" : newFiles.length ? `${newFiles.length} new` : p.report_url ? "Ready" : "");
   const result = $("report-result");
   result.hidden = busy || connectionLost || !["completed", "failed", "cancelled", "empty"].includes(p.state);
-  result.className = `panel result-${kind}`; result.replaceChildren();
+  result.className = `panel result-${resultKind}`; result.replaceChildren();
   if (!result.hidden) {
-    result.append(node("h2", title), node("p", detail));
+    result.append(node("h2", showNextBatch ? `Previous run: ${resultTitle}` : resultTitle), node("p", resultDetail));
     if (p.model) result.append(node("p", `Requested notes model for this run: ${modelName(p.model)}. Actual generation models are recorded with each note when available.`, "small"));
     const actions = node("div", undefined, "result-actions");
     if (p.report_url) {
@@ -223,15 +231,15 @@ function renderRun() {
     if (p.report_url) result.append(node("p", "Next: extract the ZIP, then open notes.docx in Word or index.html in your browser. This is a snapshot: editing Word does not edit this notebook, and later saved corrections need a new export.", "snapshot-help"));
   }
   const statusAction = $("status-action"); statusAction.hidden = false;
-  statusAction.textContent = !busy && !connectionLost && p.report_url ? "Download draft report" : busy || connectionLost ? "Details" : !state.credentials.configured ? "Open Setup" : "Generate report";
-  statusAction.onclick = () => !busy && !connectionLost && p.report_url ? downloadReport(p.report_url) : view(!busy && !connectionLost && !state.credentials.configured ? "setup" : "generate");
+  statusAction.textContent = !busy && !connectionLost && !showNextBatch && p.report_url ? "Download draft report" : busy || connectionLost ? "Details" : !state.credentials.configured ? "Open Setup" : "Generate report";
+  statusAction.onclick = () => !busy && !connectionLost && !showNextBatch && p.report_url ? downloadReport(p.report_url) : view(!busy && !connectionLost && !state.credentials.configured ? "setup" : "generate");
   const list = $("batch-files"); list.replaceChildren();
-  const ids = p.run_id ? p.asset_ids : newFiles.map(a => a.id);
+  const ids = uncertain ? pendingRun.assetIds || newFiles.map(a => a.id) : showNextBatch || !p.run_id ? newFiles.map(a => a.id) : p.asset_ids;
   for (const id of ids || []) {
     const asset = state.assets.find(a => a.id === id); if (!asset) continue;
     const row = node("div", undefined, "file-row"); const info = node("div"); info.append(node("div", asset.name, "file-name"), node("div", captureLabel(asset), "file-state"));
-    const outcome = p.files?.[id];
-    const label = outcome ? outcome.state === "ready" ? `✓ Completed · ${outcome.new_notes} new observation(s)` : outcome.state === "error" ? "! Failed · see Add files" : "Stopped · retry explicitly" : p.current_id === id && p.running ? "Working" : p.run_id ? p.running ? "Queued" : "Not completed" : "New";
+    const outcome = showNextBatch || uncertain ? null : p.files?.[id];
+    const label = showNextBatch || uncertain ? "New" : outcome ? outcome.state === "ready" ? `✓ Completed · ${outcome.new_notes} new observation(s)` : outcome.state === "error" ? "! Failed · see Add files" : "Stopped · retry explicitly" : p.current_id === id && p.running ? "Working" : p.run_id ? p.running ? "Queued" : "Not completed" : "New";
     row.append(info, node("span", label, "batch-row-status")); list.append(row);
   }
   updateTiming();
@@ -262,7 +270,9 @@ async function refresh() {
   }
   setText("diagnostic-path", state.diagnostics.path ? `Local log: ${state.diagnostics.path}` : "Persistent logging is not enabled in this session.");
   $("diagnostic-warning").hidden = !state.diagnostics.write_failed;
+  const focusedControl = document.activeElement?.dataset.focusKey;
   renderNotes(); renderFiles(); renderRun();
+  if (focusedControl) document.querySelector(`[data-focus-key="${CSS.escape(focusedControl)}"]`)?.focus({preventScroll: true});
 }
 function beginRun(assetIds = null) {
   if (!state) return;
@@ -271,24 +281,24 @@ function beginRun(assetIds = null) {
   const ids = assetIds || state.assets.filter(a => a.state === "imported").map(a => a.id);
   if (!ids.length) { message("Import a new file first, or explicitly retry a file in Add files.", true); return; }
   const runId = crypto.randomUUID().replaceAll("-", "");
-  keepPending({runId, instanceId: state.progress.instance_id, clickedAt: Date.now()});
-  startInFlight = true; $("message").hidden = true; view("generate"); renderRun();
+  keepPending({runId, instanceId: state.progress.instance_id, clickedAt: Date.now(), assetIds: ids});
+  startInFlight = runId; $("message").hidden = true; view("generate"); renderRun();
   action(async () => {
     try {
       const result = await api("/api/process", {asset_ids: ids, generate_report: assetIds === null, run_id: runId, intent: assetIds === null ? "new" : "retry"});
-      if (result.run.run_id === runId && result.run.instance_id === pendingRun?.instanceId) keepPending(null);
+      if (pendingRun?.runId === runId && result.run.run_id === runId && result.run.instance_id === pendingRun.instanceId) keepPending(null);
       if (result.run.instance_id === state.progress.instance_id && result.run.sequence >= state.progress.sequence) state.progress = result.run;
       connectionLost = false;
       await refresh();
     } catch (error) {
       if (error.status >= 400 && error.status < 500) {
         if (pendingRun?.runId === runId) keepPending(null);
-        message(error.message, true);
+        if (!pendingRun || pendingRun.runId === runId) message(error.message, true);
         try { await refresh(); } catch { /* Reconciliation remains read-only. */ }
       }
-      else if (pendingRun) { message("The start response was not confirmed. Check status; the request has not been resubmitted.", true, "start"); }
-      else message(error.message, true);
-    } finally { startInFlight = false; renderRun(); }
+      else if (pendingRun?.runId === runId) { message("The start response was not confirmed. Check status; the request has not been resubmitted.", true, "start"); }
+      else if (!pendingRun && state.progress.run_id === runId) message(error.message, true);
+    } finally { if (startInFlight === runId) startInFlight = null; renderRun(); }
   });
 }
 async function cancelRun() {
@@ -308,6 +318,9 @@ function captureLabel(asset) {
   return time?.utc ? `${new Date(time.utc).toLocaleString()} · ${time.basis.replaceAll("_", " ")}` : "Capture time unknown";
 }
 function renderNotes() {
+  const signature = JSON.stringify([state.observations.map(n => [n.id, n.revision, n.state, n.archived]), focused, [...selected], $("state-filter").value]);
+  if (signature === lastNoteSignature) { selectionCount(); return; }
+  lastNoteSignature = signature;
   const container = $("notes-list"); container.replaceChildren();
   const filter = $("state-filter").value;
   const notes = state.observations.filter(o => filter === "all" || o.state === filter).sort((a, b) => {
@@ -323,14 +336,17 @@ function renderNotes() {
     const asset = boundAsset(note, state.assets.find(a => a.id === note.asset_id));
     const card = node("div", undefined, "note-card" + (note.id === focused ? " selected" : ""));
     const checkbox = node("input"); checkbox.type = "checkbox"; checkbox.className = "select-note"; checkbox.checked = selected.has(note.id);
+    checkbox.dataset.focusKey = `select-note:${note.id}`;
     checkbox.setAttribute("aria-label", `Select ${note.generated.title} for export`);
     checkbox.onchange = () => { checkbox.checked ? selected.add(note.id) : selected.delete(note.id); selectionCount(); };
     const open = node("button", undefined, "open-note");
+    open.dataset.focusKey = `open-note:${note.id}`;
     open.append(node("span", note.generated.title, "note-title"), node("p", note.note.slice(0, 210), "note-preview"));
     const meta = node("div", undefined, "meta"); meta.append(node("span", note.state, `badge ${note.state}`), node("span", asset.name), node("span", note.archived ? "Previous draft" : captureLabel(asset))); open.append(meta);
     open.onclick = () => {
       if (dirty && !confirm("Discard unsaved changes to this note?")) return;
       focused = note.id; dirty = false; renderNotes(); renderDetail(note, asset);
+      $("note-editor").focus({preventScroll: true});
       if (innerWidth <= 1200) $("detail").scrollIntoView({block: "start"});
     };
     card.append(checkbox, open); container.append(card);
@@ -380,9 +396,8 @@ function renderDetail(note, currentAsset) {
   const head = node("div", undefined, "detail-head"); head.append(node("span", note.state, `badge ${note.state}`), node("h2", note.generated.title)); detail.append(head);
   head.append(node("p", note.generation_model ? `Generated with ${note.generation_model}` : "Generation model not recorded for this note.", "small"));
   const body = node("div", undefined, "detail-body");
-  body.append(node("h3", "Observation note"));
   const label = node("label", "Edit the note before using it in your report"); label.htmlFor = "note-editor"; body.append(label);
-  const editor = node("textarea"); editor.id = "note-editor"; editor.rows = 6; editor.value = note.note; body.append(editor);
+  const editor = node("textarea"); editor.id = "note-editor"; editor.rows = 4; editor.value = note.note; body.append(editor);
   const status = node("p", "Draft text is AI-generated. Your changes are saved only when you select Save.", "save-status"); body.append(status);
   const changed = () => { editGeneration++; dirty = true; status.textContent = "Unsaved changes"; };
   editor.oninput = changed;
@@ -434,6 +449,9 @@ function renderDetail(note, currentAsset) {
   }); body.append(node("br"), history); detail.append(body);
 }
 function renderFiles() {
+  const signature = JSON.stringify([state.assets.map(a => [a.id, a.state, a.error, a.prepared?.revision_id, a.transcript?.fingerprint]), $("file-search").value, locked(), connectionLost, importing]);
+  if (signature === lastFileSignature) return;
+  lastFileSignature = signature;
   const list = $("files-list"); list.replaceChildren();
   if (!state.assets.length) list.append(node("p", "No source files imported yet."));
   const needle = $("file-search").value.trim().toLocaleLowerCase();
@@ -444,13 +462,16 @@ function renderFiles() {
     information.append(node("div", asset.name, "file-name"), node("div", `${asset.state} · ${captureLabel(asset)}`, "file-state"));
     if (asset.error) information.append(node("p", asset.error, "file-error")); row.append(information);
     const open = node("button", "Review source", "secondary"); open.setAttribute("aria-label", `Review source ${asset.name}`);
+    open.dataset.focusKey = `open-source:${asset.id}`;
     open.onclick = () => {
       const body = $("source-detail"); body.hidden = false; body.replaceChildren(node("h2", asset.name), node("p", `Processing state: ${asset.state}`, "small"));
       if (asset.error) body.append(node("p", asset.error, "file-error"));
-      renderEvidence(body, asset); renderTranscript(body, asset); body.scrollIntoView({block: "start", behavior: "smooth"});
+      renderEvidence(body, asset); renderTranscript(body, asset); body.scrollIntoView({block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+      body.tabIndex = -1; body.focus({preventScroll: true});
     }; row.append(open);
     if (["error", "interrupted", "ready"].includes(asset.state)) {
       const retry = node("button", asset.state === "ready" ? "Update draft" : "Retry explicitly", "text-button"); retry.disabled = locked() || connectionLost;
+      retry.dataset.focusKey = `retry-source:${asset.id}`;
       retry.onclick = () => beginRun([asset.id]); row.append(retry);
     }
     list.append(row);

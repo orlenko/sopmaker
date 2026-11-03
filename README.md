@@ -110,7 +110,13 @@ and a 512,000-byte limit per file. Windows uses
 `%LOCALAPPDATA%\Sopmaker\Logs`; macOS uses `~/Library/Logs/Sopmaker`; Linux uses
 `$XDG_STATE_HOME/sopmaker/logs` or `~/.local/state/sopmaker/logs`. An explicitly set
 `XDG_STATE_HOME` also overrides the macOS location. Log writes are coordinated
-across notebook processes; unavailable logging does not fail processing.
+across notebook processes. A single background sink has a 128-event queue;
+blocked console/disk output cannot hold the processing thread. Full queues or
+sink failures drop persistent events with a warning/drop counter; the current
+session's bounded in-memory download remains available. Shutdown waits at most
+0.2 seconds for that sink, so persistence is best effort and queued events may
+be lost on exit. A blocked sink can retain one daemon thread until exit; it does
+not create additional sink threads or prevent processing/cancellation.
 A periodic waiting event confirms local activity only, not provider progress.
 
 ## Try the interface without a key

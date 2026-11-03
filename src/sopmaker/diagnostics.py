@@ -2,6 +2,7 @@
 
 import json
 import os
+import queue
 import re
 import sys
 import threading
@@ -79,6 +80,18 @@ class Diagnostics:
         self.events = deque(maxlen=300)
         self.lock = threading.Lock()
         self.write_failed = False
+        self.dropped_events = 0
+        self.closed = False
+        self.pending = queue.Queue(maxsize=128)
+        self.stopping = threading.Event()
+        self.writer = None
+        if self.console or self.directory is not None:
+            try:
+                self.writer = threading.Thread(target=self._drain, name="sopmaker-diagnostics", daemon=True)
+                self.writer.start()
+            except Exception:
+                self.writer = None
+                self.write_failed = True
 
     def emit(self, event, **fields):
         # Diagnostics must never alter processing or publication outcomes.
@@ -89,36 +102,83 @@ class Diagnostics:
             line = json.dumps(record, ensure_ascii=True) + "\n"
             with self.lock:
                 self.events.append(record)
-            if self.console:
-                try:
-                    print(line.rstrip(), file=sys.stderr, flush=True)
-                except (OSError, ValueError):
-                    pass
-            if self.directory is not None:
-                self.directory.mkdir(parents=True, exist_ok=True)
-                file = self.directory / "diagnostics.jsonl"
-                # Independent notebook processes share a bounded log. Keep handles
-                # short-lived so rotation also works on Windows.
-                with FileLock(self.directory / "diagnostics.lock", timeout=0.1):
-                    if file.exists() and file.stat().st_size + len(line.encode()) > self.max_bytes:
-                        (self.directory / "diagnostics.2.jsonl").unlink(missing_ok=True)
-                        previous = self.directory / "diagnostics.1.jsonl"
-                        if previous.exists():
-                            previous.replace(self.directory / "diagnostics.2.jsonl")
-                        file.replace(previous)
-                    with file.open("a", encoding="utf-8") as stream:
-                        stream.write(line)
+                if self.console or self.directory is not None:
+                    if self.closed or self.writer is None:
+                        self.write_failed = True
+                        self.dropped_events += 1
+                    else:
+                        try:
+                            self.pending.put_nowait(line)
+                        except queue.Full:
+                            self.write_failed = True
+                            self.dropped_events += 1
         except Exception:
+            self._failed()
+
+    def _failed(self):
+        with self.lock:
             self.write_failed = True
+            self.dropped_events += 1
+
+    def _drain(self):
+        while not (self.stopping.is_set() and self.pending.empty()):
+            try:
+                line = self.pending.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            try:
+                # No memory/counter/worker locks are held across sink I/O.
+                self._write(line)
+            except Exception:
+                self._failed()
+            finally:
+                self.pending.task_done()
+
+    def _write(self, line):
+        if self.console:
+            try:
+                print(line.rstrip(), file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                self._failed()
+        if self.directory is not None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            file = self.directory / "diagnostics.jsonl"
+            # All notebook processes serialize short-lived rotation/append handles.
+            with FileLock(self.directory / "diagnostics.lock", timeout=0.1):
+                if file.exists() and file.stat().st_size + len(line.encode()) > self.max_bytes:
+                    (self.directory / "diagnostics.2.jsonl").unlink(missing_ok=True)
+                    previous = self.directory / "diagnostics.1.jsonl"
+                    if previous.exists():
+                        previous.replace(self.directory / "diagnostics.2.jsonl")
+                    file.replace(previous)
+                with file.open("a", encoding="utf-8") as stream:
+                    stream.write(line)
+
+    def close(self, timeout=0.2):
+        with self.lock:
+            self.closed = True
+        self.stopping.set()
+        if self.writer is not None:
+            self.writer.join(timeout=min(0.2, max(0, timeout)))
+            if self.writer.is_alive():
+                with self.lock:
+                    self.write_failed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     def info(self):
-        return {"path": str(self.directory / "diagnostics.jsonl") if self.directory else None,
-                "write_failed": self.write_failed}
+        with self.lock:
+            return {"path": str(self.directory / "diagnostics.jsonl") if self.directory else None,
+                    "write_failed": self.write_failed, "dropped_events": self.dropped_events}
 
     def download(self):
         # No filesystem reads, arbitrary paths, launcher output or provider bodies.
         with self.lock:
-            events = list(self.events)
-        return {"app_version": __version__, "platform": sys.platform,
-                "scope": "Last 300 diagnostic events from this app session only; no inspection content.",
-                "log_write_failed": self.write_failed, "events": events}
+            return {"app_version": __version__, "platform": sys.platform,
+                    "scope": "Last 300 diagnostic events from this app session only; no inspection content.",
+                    "log_write_failed": self.write_failed, "dropped_events": self.dropped_events,
+                    "events": [dict(event) for event in self.events]}
