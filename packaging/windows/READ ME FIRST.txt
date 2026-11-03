@@ -62,8 +62,9 @@ Start with a few non-identifying sample photos or short recordings for practice.
   evidence links continue to work.
 - Check every observation against its original evidence and correct mistakes.
   AI notes start as drafts; they do not make compliance decisions for you.
-- To correct notes inside Sopmaker, use Review notes, open an observation,
-  edit it and click Save note. Enter your reviewer name before marking Reviewed.
+- To correct notes inside Sopmaker, use Review notes, open an observation and
+  edit it. If marking Reviewed, enter your reviewer name and check Reviewed.
+  Then click Save note to save both your text and its review status.
 - To make a report from saved notes, select them, enable Include drafts only if
   you want unreviewed drafts included, then click Export selected.
 - A report download is a snapshot. Saving later corrections in Sopmaker requires
