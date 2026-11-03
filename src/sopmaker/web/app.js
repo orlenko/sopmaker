@@ -68,6 +68,7 @@ function populateTimezones() {
   const select = $("inspection-timezone"), groups = new Map(), opened = new Date();
   const ids = new Set(state.timezone_options);
   ids.add(state.settings.timezone); // Preserve exact saved aliases, including UTC.
+  if (computerTimezone) ids.add(computerTimezone); // The session response validated this alias on the backend.
   function label(id) {
     if (id === "UTC") return "UTC — Coordinated Universal Time";
     const city = id.split("/").at(-1).replaceAll("_", " ");
@@ -668,7 +669,8 @@ $("state-filter").onchange = () => renderNotes(); $("show-archived").onchange = 
 $("file-search").oninput = () => renderFiles();
 window.addEventListener("beforeunload", event => { if (unsavedWork()) { event.preventDefault(); event.returnValue = ""; } });
 action(async () => {
-  await api("/api/session", {timezone: computerTimezone}); await refresh();
+  const session = await api("/api/session", {timezone: computerTimezone});
+  computerTimezone = session.computer_timezone; await refresh();
   if (!state.assets.length) view(state.credentials.configured && state.timezone_origin !== "unavailable" ? "evidence" : "setup");
   if (state.timezone_origin === "unavailable") message("Choose the inspection timezone in Setup. The computer's timezone could not be detected; UTC is selected until you choose and save.");
 });

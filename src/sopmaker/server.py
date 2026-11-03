@@ -246,8 +246,8 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self, path, body):
         store, engine, credentials = self.server.store, self.server.engine, self.server.credentials
         if path == "/api/session":
-            store.initialize_timezone(body.get("timezone"))
-            return self._send(200, {"ok": True}, headers={"Set-Cookie": f"{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
+            computer_timezone = store.initialize_timezone(body.get("timezone"))
+            return self._send(200, {"ok": True, "computer_timezone": computer_timezone}, headers={"Set-Cookie": f"{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
         if path in ("/api/notebooks", "/api/notebooks/open"):
             if not self.server.library:
                 raise ValueError("Use the Sopmaker launcher to open the notebook library.")

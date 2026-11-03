@@ -55,6 +55,13 @@ def test_imported_data_prevents_automatic_timezone_change(store, photo):
     assert store.settings()["timezone"] == "UTC" and store.timezone_origin() == "existing"
 
 
+def test_detected_fixed_zone_is_validated_without_overwriting_saved_utc(store):
+    store.save_settings({"timezone": "UTC"})
+    assert store.initialize_timezone("Etc/GMT+5") == "Etc/GMT+5"
+    assert store.settings()["timezone"] == "UTC"
+    assert store.initialize_timezone("../invalid") is None
+
+
 @pytest.mark.parametrize("first", ["initialize", "choose", "simultaneous"])
 def test_startup_and_explicit_choice_are_atomic_in_both_orders(store, first):
     def initialize():

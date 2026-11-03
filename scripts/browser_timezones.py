@@ -15,12 +15,14 @@ from sopmaker.worker import Engine
 def main():
     with tempfile.TemporaryDirectory(prefix="sopmaker-timezone-browser-") as temporary, sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        for scenario in ("new", "existing UTC", "saved alias", "unavailable"):
+        for scenario in ("new", "existing UTC", "saved alias", "unavailable", "fixed computer"):
             store = Store(Path(temporary) / scenario)
             if scenario == "existing UTC":
                 with store.connect() as db:
                     db.execute("DELETE FROM settings WHERE key='_timezone_origin'")
                 store = Store(store.root)
+            if scenario == "fixed computer":
+                store.save_settings({"timezone": "UTC"})
             if scenario == "saved alias":
                 store.save_settings({"timezone": "US/Eastern"})
             credentials = Credentials(False)
@@ -30,7 +32,7 @@ def main():
                 thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
                 thread.start()
                 try:
-                    context = browser.new_context(timezone_id="Asia/Kathmandu", viewport={"width": 1366, "height": 900})
+                    context = browser.new_context(timezone_id="Etc/GMT+5" if scenario == "fixed computer" else "Asia/Kathmandu", viewport={"width": 1366, "height": 900})
                     if scenario == "unavailable":
                         context.add_init_script("""(() => {
                           const original = Intl.DateTimeFormat;
@@ -46,7 +48,7 @@ def main():
                     select = page.get_by_label("Inspection timezone", exact=True)
                     expect(select).to_be_visible()
                     assert select.evaluate("element => element.tagName") == "SELECT"
-                    expected = {"existing UTC": "UTC", "saved alias": "US/Eastern", "unavailable": "UTC"}.get(scenario)
+                    expected = {"existing UTC": "UTC", "saved alias": "US/Eastern", "unavailable": "UTC", "fixed computer": "UTC"}.get(scenario)
                     if scenario == "new":
                         detected = page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
                         expect(select).to_have_value(detected)
@@ -68,7 +70,15 @@ def main():
                     else:
                         expect(select).to_have_value(expected)
                         assert store.settings()["timezone"] == expected
-                        if scenario == "unavailable":
+                        if scenario == "fixed computer":
+                            option = select.locator('optgroup[label="This computer"] option')
+                            expect(option).to_have_attribute("value", "Etc/GMT+5")
+                            expect(option).to_have_text("Fixed offset — UTC-05:00")
+                            select.select_option("Etc/GMT+5")
+                            page.get_by_role("button", name="Save details", exact=True).click()
+                            expect(page.locator("#message")).to_contain_text("Notebook details saved")
+                            assert store.settings()["timezone"] == "Etc/GMT+5"
+                        elif scenario == "unavailable":
                             expect(page.locator("#message")).to_contain_text("could not be detected")
                             select.select_option("America/Toronto")
                             page.get_by_role("button", name="Save details", exact=True).click()

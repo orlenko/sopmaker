@@ -115,25 +115,27 @@ class Store:
 
     def initialize_timezone(self, detected):
         """Set a computer default once, only for a new, empty, unconfigured notebook."""
+        try:
+            if not isinstance(detected, str) or len(detected) > 200:
+                raise ValueError("Invalid detected timezone")
+            ZoneInfo(detected)
+        except (KeyError, ValueError, TypeError):
+            detected = None
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             origin = json.loads(db.execute("SELECT value FROM settings WHERE key='_timezone_origin'").fetchone()[0])
             if origin != "pending":
-                return
+                return detected
             current = json.loads(db.execute("SELECT value FROM settings WHERE key='timezone'").fetchone()[0])
             if current != "UTC" or db.execute("SELECT 1 FROM assets LIMIT 1").fetchone():
                 origin = "existing"
+            elif detected is None:
+                origin = "unavailable"
             else:
-                try:
-                    if not isinstance(detected, str) or len(detected) > 200:
-                        raise ValueError("Invalid detected timezone")
-                    ZoneInfo(detected)
-                except (KeyError, ValueError, TypeError):
-                    origin = "unavailable"
-                else:
-                    db.execute("UPDATE settings SET value=? WHERE key='timezone'", (json.dumps(detected),))
-                    origin = "computer"
+                db.execute("UPDATE settings SET value=? WHERE key='timezone'", (json.dumps(detected),))
+                origin = "computer"
             db.execute("UPDATE settings SET value=? WHERE key='_timezone_origin'", (json.dumps(origin),))
+        return detected
 
     def save_settings(self, values: dict) -> None:
         if set(values) - set(self.defaults()):
