@@ -41,7 +41,7 @@ def main():
                     page.get_by_role("textbox", name="Reviewer name").fill("Fixture reviewer")
                     page.get_by_label("Reviewed", exact=True).check()
                     page.get_by_role("button", name="Save note", exact=True).click()
-                    expect(page.get_by_role("status")).to_contain_text("Note saved")
+                    expect(page.locator("#message")).to_contain_text("Note saved")
                     page.get_by_role("searchbox").fill("Human-reviewed")
                     expect(page.locator(".note-card")).to_have_count(1)
                     page.get_by_label("Select Synthetic example: cabinet label for export").check()
@@ -61,14 +61,14 @@ def main():
                     expect(page.locator("#key-status")).to_contain_text("session")
                     assert page.get_by_label("API key", exact=True).input_value() == ""
                     assert "invented-browser-test-key" not in page.content()
-                    page.get_by_role("button", name="Source files", exact=False).click()
+                    page.get_by_role("button", name="Add files", exact=False).click()
                     upload = root / "another-synthetic.png"
                     Image.new("RGB", (100, 100), "blue").save(upload)
                     page.locator("#file-picker").set_input_files(str(upload))
-                    expect(page.get_by_role("status")).to_contain_text("Imported 1 file(s) locally")
-                    expect(page.locator(".file-row")).to_have_count(2)
+                    expect(page.locator("#message")).to_contain_text("Imported 1 file(s) locally")
+                    expect(page.locator("#files-list .file-row")).to_have_count(2)
                     page.get_by_role("searchbox", name="Search source files").fill("another-synthetic")
-                    expect(page.locator(".file-row")).to_have_count(1)
+                    expect(page.locator("#files-list .file-row")).to_have_count(1)
                     page.set_viewport_size({"width": 600, "height": 900})
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     assert not errors, errors

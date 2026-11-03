@@ -12,21 +12,24 @@ FIRST TIME
    On later launches, click Use saved key. Otherwise paste a session-only key.
 
 GENERATE A DRAFT REPORT
-1. Open the Sopmaker desktop shortcut, then Source files in the browser.
+1. Open the Sopmaker desktop shortcut, then Add files in the browser.
 2. Drop photos, short videos or voice recordings into the drop area. You can also
    drop a folder, or use Choose files / Choose folder. Extract media ZIPs first.
    Import only copies files locally; it does not call the AI service.
-3. Click Generate draft report. This sends prepared images/audio to OpenAI using
+3. Open Generate report, then click Generate draft report once. This sends prepared images/audio to OpenAI using
    your key. It processes new files in this batch, then prepares a draft report.
+   The button locks and the bottom strip shows stages and elapsed time. Notes
+   may appear before the ZIP is ready. Keep Sopmaker open; do not submit again
+   when confirmation is uncertain. Check status only checks the existing request.
 4. Click Download draft report when it appears. Extract the downloaded ZIP.
    Open notes.docx for the editable Word draft, or index.html for linked evidence.
 5. Check the notes against the originals and correct mistakes before using them.
    Automatic notes are unreviewed drafts; they are not compliance decisions.
 
 IF A FILE FAILS
-No automatic report is produced for an incomplete batch. Review Source files and
+No automatic report is produced for an incomplete batch. Review Add files and
 use Retry explicitly for failed files; the API may charge for retries. After all
-files are ready, use Observations to select notes, enable Include drafts if
+files are ready, use Review notes to select notes, enable Include drafts if
 needed, and Export selected. Existing notes and completed stages are preserved.
 If no observations are generated, review the original sources; no empty report
 is presented as a successful inspection.
@@ -35,7 +38,7 @@ YOUR FILES
 Notebooks are in Documents\Sopmaker\Notebook for your Windows account. Back up
 that folder. The app copies originals there, so allow disk space for media and
 exports. A new batch adds to this notebook; its generated report contains only
-that batch. Use Observations to build a report from several batches.
+that batch. Use Review notes to build a report from several batches.
 Close the app/console window when finished. Closing only the browser leaves the
 app running. Close Sopmaker before running setup again to update it. Updates
 replace application files, leaving notebooks and saved keys in place.
@@ -47,6 +50,21 @@ copy may remain in Sopmaker-failed-*. Review these copies before removing them
 manually. Setup does not recursively delete an installed app folder.
 
 TROUBLESHOOTING
+The bottom status strip is visible on every page. It distinguishes preparation,
+API waits, saving notes, preparing the ZIP and completion/failure. Low activity
+in Task Manager may be normal during an API wait; it does not prove progress.
+Cancel requested is different from finished cancellation. An API call already
+sent may finish and be billed. Existing notes and originals are kept.
+
+In Setup > Troubleshooting, click Download diagnostics for recent safe stage
+information. Review this JSON before sharing. Use it rather than copying the
+whole console, which contains your local launcher link. Diagnostics exclude keys,
+media, narration, notes and inspection filenames/paths. Local rotating log files
+are in %LOCALAPPDATA%\Sopmaker\Logs; the console prints the location at startup.
+Browser refresh can recover the current app's status; closing/restarting the app
+does not restore the previous job status or download link. Saved notes and
+export files remain in the notebook; retry only as an explicit decision.
+
 This proof of concept is unsigned. Windows or workplace policy may block it.
 Use the package supplied by the project owner; ask IT if approval is needed.
 Do not disable Defender or change your organization's security settings.

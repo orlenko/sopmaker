@@ -1,0 +1,434 @@
+import json
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+import pytest
+from PIL import Image
+from test_reports import ReportProvider
+
+from sopmaker.credentials import Credentials
+from sopmaker.diagnostics import Diagnostics
+from sopmaker.server import ReviewServer
+from sopmaker.store import Store
+from sopmaker.worker import Engine
+
+
+def engine_for(store, provider=ReportProvider, diagnostics=None):
+    key = Credentials(False)
+    key.set("invented-lifecycle-key")
+    return Engine(store, key, provider, diagnostics)
+
+
+def test_correlated_run_frozen_batch_and_real_packaging(store, photo, tmp_path, monkeypatch):
+    from sopmaker.exporter import export_notes
+
+    drafting, finish_draft, packaging, finish_zip = (threading.Event() for _ in range(4))
+    calls = []
+
+    class Held(ReportProvider):
+        def draft(self, sources, directory, model, context):
+            calls.append(model)
+            drafting.set()
+            assert finish_draft.wait(5)
+            return super().draft(sources)
+
+    def held_export(*args, **kwargs):
+        packaging.set()
+        assert finish_zip.wait(5)
+        return export_notes(*args, **kwargs)
+
+    monkeypatch.setattr("sopmaker.worker.export_notes", held_export)
+    store.import_file(photo)
+    engine = engine_for(store, Held)
+    run_id = uuid.uuid4().hex
+    engine.start(generate_report=True, run_id=run_id)
+    try:
+        assert drafting.wait(5)
+        snapshot = engine.progress
+        assert snapshot["stage"] == "drafting" and snapshot["running"]
+        assert snapshot["completed"] == 0 and snapshot["notes"] == 0
+        assert snapshot["run_id"] == run_id and snapshot["file_started_at"]
+        snapshot["asset_ids"].clear()
+        assert len(engine.progress["asset_ids"]) == 1
+        assert engine.start(generate_report=True, run_id=run_id)["run_id"] == run_id
+        with pytest.raises(ValueError, match="already running"):
+            engine.start(run_id=uuid.uuid4().hex)
+        with pytest.raises(ValueError, match="no longer current"):
+            engine.stop(uuid.uuid4().hex)
+        extra = tmp_path / "extra.png"
+        Image.new("RGB", (10, 10), "orange").save(extra)
+        store.import_file(extra)
+        store.save_settings({"vision_model": "custom-after-start"})
+        finish_draft.set()
+        assert packaging.wait(5)
+        packed = engine.progress
+        assert packed["stage"] == "packaging" and packed["running"]
+        assert packed["completed"] == packed["total"] == packed["notes"] == 1
+        assert len(store.observations()) == 1 and not packed.get("report_url")
+        assert packed["model"] != "custom-after-start"
+        assert packed["sequence"] > snapshot["sequence"]
+    finally:
+        finish_draft.set()
+        finish_zip.set()
+        engine.thread.join(10)
+    result = engine.progress
+    assert result["state"] == "completed" and result["report_url"]
+    assert result["total"] == 1 and calls == [result["model"]]
+    assert engine.receipt(run_id) == result
+    # A delayed identical start after completion must not consume a new file.
+    engine.start(generate_report=True, run_id=run_id)
+    assert calls == [result["model"]]
+    assert store.asset(store.assets()[-1]["id"])["state"] == "imported"
+
+
+def test_thread_start_failure_is_terminal_and_releases_admission(store, photo, monkeypatch):
+    store.import_file(photo)
+    engine = engine_for(store)
+    run_id = uuid.uuid4().hex
+    with monkeypatch.context() as patch:
+        patch.setattr(threading.Thread, "start", lambda _: (_ for _ in ()).throw(RuntimeError("invented secret")))
+        with pytest.raises(RuntimeError):
+            engine.start(run_id=run_id)
+    assert engine.progress["state"] == "failed" and not engine.lock.locked()
+    assert "invented secret" not in json.dumps(engine.progress)
+    engine.start(run_id=run_id)
+    assert engine.progress["state"] == "failed"  # No replay of the rejected admission.
+    engine.start()
+    engine.thread.join(10)
+    assert engine.progress["state"] == "completed"
+
+
+def test_identical_start_paused_before_admission_cannot_replay_a_failed_run(store, photo, monkeypatch):
+    calls, failures = [], []
+    missing, resume = threading.Event(), threading.Event()
+
+    class FailedDraft(ReportProvider):
+        def draft(self, *_):
+            calls.append(1)
+            raise ValueError("invented provider failure")
+
+    store.import_file(photo)
+    aid = store.assets()[0]["id"]
+    engine = engine_for(store, FailedDraft)
+    run_id = uuid.uuid4().hex
+    original_receipt = engine.receipt
+
+    def held_receipt(identity):
+        result = original_receipt(identity)
+        if threading.current_thread().name == "delayed-start" and not missing.is_set():
+            assert result is None
+            missing.set()
+            assert resume.wait(5)
+        return result
+
+    monkeypatch.setattr(engine, "receipt", held_receipt)
+
+    def delayed_start():
+        try:
+            engine.start(asset_ids=[aid], run_id=run_id)
+        except Exception as exc:
+            failures.append(exc)
+
+    late = threading.Thread(target=delayed_start, name="delayed-start")
+    late.start()
+    try:
+        assert missing.wait(5)
+        engine.start(asset_ids=[aid], run_id=run_id)
+        engine.thread.join(5)
+        original = engine.receipt(run_id)
+        assert original["state"] == "failed"
+    finally:
+        resume.set()
+        late.join(5)
+    assert not failures and calls == [1]
+    assert engine.receipt(run_id) == original and not engine.lock.locked()
+
+
+def test_stale_new_batch_does_not_become_an_implicit_retry(store, photo):
+    store.import_file(photo)
+    aid = store.assets()[0]["id"]
+    engine = engine_for(store)
+    for state in ("error", "ready", "interrupted"):
+        store.update_asset(aid, state=state)
+        with pytest.raises(ValueError, match="No work was started"):
+            engine.start(asset_ids=[aid], generate_report=True, new_only=True)
+        assert engine.progress["state"] == "idle" and not engine.lock.locked()
+
+
+@pytest.mark.parametrize("run_id", ["", 0, False, "not-a-run-id", "a" * 33])
+def test_invalid_supplied_run_identity_never_starts_work(store, photo, run_id):
+    store.import_file(photo)
+    engine = engine_for(store)
+    with pytest.raises(ValueError, match="Invalid run identity"):
+        engine.start(run_id=run_id)
+    assert engine.thread is None and not engine.lock.locked()
+
+
+def test_state_read_retries_a_completion_between_database_and_progress(store, photo, monkeypatch):
+    store.import_file(photo)
+    engine = engine_for(store)
+    original = store.observations
+    triggered = False
+
+    def finish_during_read(*args, **kwargs):
+        nonlocal triggered
+        result = original(*args, **kwargs)
+        if not triggered:
+            triggered = True
+            engine.start(generate_report=True)
+            engine.thread.join(5)
+        return result
+
+    monkeypatch.setattr(store, "observations", finish_during_read)
+    with ReviewServer(store, engine, engine.credentials) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            response = urlopen(Request(server.origin + "/api/state", headers={
+                "Authorization": "Bearer " + server.token}), timeout=10)
+            state = json.loads(response.read())
+            assert state["progress"]["state"] == "completed"
+            assert len(state["observations"]) == 1 and state["assets"][0]["state"] == "ready"
+        finally:
+            server.shutdown()
+            thread.join(5)
+
+
+def test_cli_stdout_stays_machine_readable_with_console_diagnostics(tmp_path, photo, monkeypatch, capfd):
+    from sopmaker import app
+
+    credentials = Credentials(False)
+    credentials.set("invented-cli-key")
+    monkeypatch.setattr(app, "Credentials", lambda: credentials)
+    monkeypatch.setattr(app, "log_directory", lambda: tmp_path / "logs")
+    monkeypatch.setattr(app, "Engine", lambda store, key, diagnostics: Engine(store, key, ReportProvider, diagnostics))
+    workspace = str(tmp_path / "cli-workspace")
+    source = tmp_path / "input"
+    source.mkdir()
+    (source / "photo.png").write_bytes(photo.read_bytes())
+    app.main(["import", str(source), "--workspace", workspace])
+    assert json.loads(capfd.readouterr().out)["imported"] == 1
+    app.main(["process", "--workspace", workspace])
+    captured = capfd.readouterr()
+    assert json.loads(captured.out)["observations"] == 1
+    assert "stage_started" in captured.err and "invented-cli-key" not in captured.err
+    app.main(["export", "--include-drafts", "--workspace", workspace])
+    path = capfd.readouterr().out.strip()
+    assert "\n" not in path and path.endswith(".zip")
+
+
+def test_cleanup_failure_withholds_report_and_cached_retry_is_explicit(store, photo):
+    class BadClose(ReportProvider):
+        def close(self):
+            raise OSError("invented private path / credential")
+
+    store.import_file(photo)
+    engine = engine_for(store, BadClose)
+    engine.start(generate_report=True)
+    engine.thread.join(10)
+    assert engine.progress["state"] == "failed" and engine.progress["cleanup_error"]
+    assert not engine.progress.get("report_url") and not engine.lock.locked()
+    assert not list((store.root / "exports").glob("*.zip"))
+    assert len(store.observations()) == 1
+    events = engine.diagnostics.download()
+    assert "invented private" not in json.dumps(events)
+    engine.provider_factory = ReportProvider
+    engine.start(asset_ids=[store.assets()[0]["id"]], generate_report=True)
+    engine.thread.join(10)
+    assert engine.progress["state"] == "completed" and engine.progress["notes"] == 0
+    assert engine.progress["completed"] == engine.progress["report_notes"] == 1
+
+
+def test_saved_models_survive_and_request_policy_changes_require_explicit_processing(store, photo, monkeypatch):
+    for model in ("gpt-5.4-mini", "custom-saved-model", "gpt-6.1-terra"):
+        store.save_settings({"vision_model": model})
+        assert Store(store.root).settings()["vision_model"] == model
+    store.save_settings({"vision_model": "gpt-6.1-sol"})
+    store.import_file(photo)
+    engine = engine_for(store)
+    calls = []
+
+    class Counting(ReportProvider):
+        def draft(self, sources, *args):
+            calls.append(1)
+            return super().draft(sources)
+
+    provider = Counting(None)
+    aid = store.assets()[0]["id"]
+    engine.process_one(store.asset(aid), store.settings(), provider)
+    engine.process_one(store.asset(aid), store.settings(), provider)
+    assert len(calls) == 1
+    monkeypatch.setattr("sopmaker.worker.draft_options", lambda _: {"reasoning": {"effort": "low"}, "max_output_tokens": 12001})
+    assert len(calls) == 1  # Configuration changes do not launch paid processing.
+    engine.process_one(store.asset(aid), store.settings(), provider)
+    assert len(calls) == 2
+    assert len(store.observations(include_archived=True)) == 2
+
+
+def test_diagnostics_redaction_rotation_and_write_failure(tmp_path):
+    logs = tmp_path / "logs"
+    diagnostics = Diagnostics(logs, max_bytes=400)
+    for _ in range(30):
+        diagnostics.emit("stage_started", stage="drafting", model="invented-secret-as-model",
+                         request_id="req_bad\nprivate narration", note="private note", path="private path")
+    deadline = time.monotonic() + 3
+    while diagnostics.pending.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert diagnostics.pending.unfinished_tasks == 0
+    diagnostics.close()
+    files = list(logs.glob("*.jsonl"))
+    assert len(files) == 3 and all(f.stat().st_size <= 400 for f in files)
+    output = json.dumps(diagnostics.download()) + "".join(f.read_text() for f in files)
+    assert "invented-secret" not in output and "private" not in output
+    assert '"model": "custom"' in output
+    diagnostics.emit("file_failed", category="local", request_id="req_fixture_123", http_status=429)
+    assert diagnostics.download()["events"][-1]["request_id"] == "req_fixture_123"
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("invented")
+    failed = Diagnostics(blocked)
+    failed.emit("run_started", total=1)
+    failed.close()
+    assert failed.info()["write_failed"] and len(failed.download()["events"]) == 1
+
+
+def test_blocked_diagnostic_sink_cannot_stall_work_cancel_or_next_admission(store, photo, tmp_path, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked_write(self, line):
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(Diagnostics, "_write", blocked_write)
+    diagnostics = Diagnostics(tmp_path / "logs")
+    diagnostics.emit("app_started")
+    assert entered.wait(2)
+    store.import_file(photo)
+    engine = engine_for(store, diagnostics=diagnostics)
+    try:
+        engine.start(generate_report=True)
+        engine.thread.join(2)
+        assert engine.progress["state"] == "completed" and not engine.lock.locked()
+        drafting, finish_draft = threading.Event(), threading.Event()
+
+        class Held(ReportProvider):
+            def draft(self, sources, *_):
+                drafting.set()
+                assert finish_draft.wait(2)
+                return super().draft(sources)
+
+        store.save_settings({"context": "explicit fresh processing"})
+        engine.provider_factory = Held
+        engine.start(asset_ids=[store.assets()[0]["id"]], generate_report=True)
+        assert drafting.wait(2)
+        engine.stop(engine.progress["run_id"])
+        finish_draft.set()
+        engine.thread.join(2)
+        assert engine.progress["state"] == "cancelled" and not engine.lock.locked()
+        engine.start(asset_ids=[store.assets()[0]["id"]])
+        engine.thread.join(2)
+        assert engine.progress["state"] == "completed"
+        for _ in range(500):
+            diagnostics.emit("waiting", elapsed_s=1)
+        assert diagnostics.pending.qsize() == diagnostics.pending.maxsize == 128
+        data = diagnostics.download()
+        assert len(data["events"]) == 300 and data["dropped_events"] > 0 and data["log_write_failed"]
+        assert [t for t in threading.enumerate() if t is diagnostics.writer] == [diagnostics.writer]
+        started = time.monotonic()
+        diagnostics.close(timeout=0.01)
+        assert time.monotonic() - started < 0.3
+        remaining = diagnostics.pending.qsize()
+        diagnostics.emit("waiting")
+        assert diagnostics.pending.qsize() == remaining  # No consumer restart after close.
+    finally:
+        release.set()
+        diagnostics.close()
+        diagnostics.writer.join(2)
+    assert not diagnostics.writer.is_alive()
+
+
+def test_diagnostic_thread_start_failure_stays_memory_only(tmp_path, monkeypatch):
+    def fail_start(_):
+        raise RuntimeError("invented startup failure")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+    diagnostics = Diagnostics(tmp_path / "logs")
+    diagnostics.emit("app_started")
+    diagnostics.close()
+    diagnostics.close()
+    result = diagnostics.download()
+    assert diagnostics.writer is None and diagnostics.pending.qsize() == 0
+    assert result["log_write_failed"] and result["dropped_events"] == 1
+    assert result["events"][0]["event"] == "app_started"
+
+
+def test_real_undrained_stderr_pipe_allows_clean_subprocess_exit(tmp_path):
+    script = """
+import os,time
+if os.name == 'posix':
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+from sopmaker.diagnostics import Diagnostics
+d = Diagnostics(console=True)
+counts = [0, 0]
+original = d._write
+def traced(line):
+    counts[0] += 1
+    original(line)
+    counts[1] += 1
+d._write = traced
+for index in range(50000):
+    d.emit('waiting', model='gpt-6.1-sol', run_id='a'*32, elapsed_s=index)
+    if index % 100 == 0:
+        time.sleep(0.001)
+assert counts[0] > counts[1] and d.pending.full(), (counts, d.pending.qsize())
+started = time.monotonic()
+d.close(timeout=0.01)
+assert time.monotonic() - started < 0.3
+assert d.writer.is_alive() and d.download()['log_write_failed']
+print('clean exit with blocked raw stderr', flush=True)
+"""
+    process = subprocess.Popen([sys.executable, "-c", script], cwd=tmp_path,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        # Deliberately do not drain stderr until after interpreter termination.
+        process.wait(timeout=10)
+        output, errors = process.communicate(timeout=2)
+        assert process.returncode == 0, errors[-1000:]
+        assert b"clean exit with blocked raw stderr" in output
+        assert b"_enter_buffered_busy" not in errors
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def test_diagnostic_and_receipt_routes_require_current_session(store):
+    engine = engine_for(store)
+    engine.diagnostics.emit("app_started", secret="invented-secret")
+    with ReviewServer(store, engine, engine.credentials) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for path in ("/api/diagnostics", "/api/runs/" + uuid.uuid4().hex):
+                with pytest.raises(HTTPError) as denied:
+                    urlopen(server.origin + path, timeout=5)
+                assert denied.value.code == 403
+            request = Request(server.origin + "/api/diagnostics?path=inspection.sqlite3",
+                              headers={"Authorization": "Bearer " + server.token})
+            with urlopen(request, timeout=5) as response:
+                data = response.read().decode()
+                assert "attachment" in response.headers["Content-Disposition"]
+                assert "invented-secret" not in data and server.token not in data and str(store.root) not in data
+                assert json.loads(data)["events"][0]["event"] == "app_started"
+            with pytest.raises(HTTPError) as denied:
+                urlopen(Request(server.origin + "/api/diagnostics", headers={
+                    "Authorization": "Bearer " + server.token, "Origin": "https://example.invalid"}), timeout=5)
+            assert denied.value.code == 403
+        finally:
+            server.shutdown()
+            thread.join(5)

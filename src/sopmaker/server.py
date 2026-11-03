@@ -11,8 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .diagnostics import error_category
 from .exporter import export_notes
 from .media import SUPPORTED
+from .model_settings import MODEL_OPTIONS
 from .store import MAX_FILE_BYTES, Conflict
 
 WEB = Path(__file__).parent / "web"
@@ -119,7 +121,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "The request could not be applied. Check inputs, reviewer name, and setup."})
         except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception:
+        except Exception as exc:
+            self.server.engine.diagnostics.emit("local_error", category=error_category(exc))
             self._send(500, {"error": "The local operation failed. Your originals and saved notes are preserved."})
 
     def _get(self, path):
@@ -127,10 +130,29 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(path.query)
         if path.path == "/api/state":
             settings = store.settings()
-            return self._send(200, {"settings": settings, "assets": store.assets(),
-                                    "observations": store.observations(query.get("q", [""])[0], query.get("archived") == ["1"]),
-                                    "progress": self.server.engine.progress,
-                                    "credentials": {"configured": bool(self.server.credentials.key), "origin": self.server.credentials.origin}})
+            # A terminal snapshot must not accompany notes/assets read before
+            # completion, since the browser stops polling on terminal state.
+            for _ in range(3):
+                before = self.server.engine.progress
+                assets = store.assets()
+                observations = store.observations(query.get("q", [""])[0], query.get("archived") == ["1"])
+                progress = self.server.engine.progress
+                if before["sequence"] == progress["sequence"]:
+                    return self._send(200, {"settings": settings, "assets": assets,
+                                            "observations": observations, "progress": progress,
+                                            "model_options": MODEL_OPTIONS,
+                                            "diagnostics": self.server.engine.diagnostics.info(),
+                                            "credentials": {"configured": bool(self.server.credentials.key), "origin": self.server.credentials.origin}})
+            return self._send(503, {"error": "Status changed while it was being read. Check status again; nothing was resubmitted."})
+        if path.path.startswith("/api/runs/"):
+            run_id = path.path.rsplit("/", 1)[1]
+            if not re.fullmatch(r"[a-f0-9]{32}", run_id):
+                raise ValueError("Invalid run identity.")
+            return self._send(200, {"instance_id": self.server.engine.instance_id,
+                                    "run": self.server.engine.receipt(run_id)})
+        if path.path == "/api/diagnostics":
+            return self._send(200, self.server.engine.diagnostics.download(), headers={
+                "Content-Disposition": 'attachment; filename="sopmaker-diagnostics.json"'})
         if path.path.startswith("/api/history/"):
             return self._send(200, store.history(path.path.rsplit("/", 1)[1]))
         if path.path.startswith("/media/"):
@@ -223,9 +245,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/key/forget":
             credentials.forget()
         elif path == "/api/process":
-            engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True)
+            intent = body.get("intent", "new" if body.get("generate_report") is True else "retry")
+            if intent not in ("new", "retry"):
+                raise ValueError("Choose new-file generation or an explicit retry.")
+            result = engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True,
+                                  run_id=body.get("run_id"), new_only=intent == "new")
+            return self._send(200, {"run": result})
         elif path == "/api/cancel":
-            engine.stop()
+            if not isinstance(body.get("run_id"), str):
+                raise ValueError("Check the current run before cancelling.")
+            engine.stop(body["run_id"])
         elif path == "/api/edit":
             return self._send(200, store.edit(body["id"], body["revision"], body["note"], body["state"], body.get("reviewer", "")))
         elif path == "/api/export":

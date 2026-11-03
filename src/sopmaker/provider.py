@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
+from .model_settings import draft_options
 from .models import DraftBatch, validate_evidence
 
 PROMPT_VERSION = "inspection-observation-v3"
@@ -99,18 +100,22 @@ def safe_error(exc: Exception) -> str:
 
 class OpenAIProvider:
     def __init__(self, key: str):
+        self.last_request_id = None
         self.client = OpenAI(api_key=key, base_url="https://api.openai.com/v1",
                              max_retries=0, timeout=180)
 
     def transcribe(self, path: Path, model: str, context: str) -> dict:
+        self.last_request_id = None
         if path.stat().st_size >= 25_000_000:
             raise ProviderError("Audio chunk exceeds the API upload limit.")
         with path.open("rb") as audio:
             response = self.client.audio.transcriptions.create(
                 file=audio, model=model, prompt=context or None)
+        self.last_request_id = getattr(response, "_request_id", None)
         return response.model_dump(mode="json")
 
     def draft(self, sources: dict[str, dict], directory: Path, model: str, context: str):
+        self.last_request_id = None
         content = [{"type": "input_text", "text": "Vocabulary/context (not new evidence): " + context}]
         for source_id, source in sources.items():
             if source["kind"] == "transcript":
@@ -125,7 +130,8 @@ class OpenAIProvider:
             model=model, instructions=INSTRUCTIONS, input=[{"role": "user", "content": content}],
             text={"format": {"type": "json_schema", "name": "inspection_observations",
                              "schema": schema, "strict": True}},
-            store=False, max_output_tokens=6000)
+            store=False, **draft_options(model))
+        self.last_request_id = getattr(response, "_request_id", None)
         if response.status != "completed" or not response.output_text:
             raise ProviderError("The model refused or did not finish this draft.")
         batch = DraftBatch.model_validate_json(response.output_text)
@@ -135,6 +141,7 @@ class OpenAIProvider:
             raise ProviderError(str(exc)) from None
         return batch, {"response_id": response.id, "model": response.model,
                        "prompt_version": PROMPT_VERSION,
+                       "request_options": draft_options(model),
                        "usage": response.usage.model_dump(mode="json") if response.usage else {},
                        "output": batch.model_dump(mode="json")}
 

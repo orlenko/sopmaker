@@ -11,6 +11,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .media import SUPPORTED
+from .model_settings import DEFAULT_NOTES_MODEL
 from .models import note_text
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024
@@ -87,7 +88,7 @@ class Store:
     @staticmethod
     def defaults() -> dict:
         return {"name": "Inspection notebook", "timezone": "UTC", "context": "",
-                "vision_model": "gpt-5.4-mini", "transcription_model": "gpt-transcribe"}
+                "vision_model": DEFAULT_NOTES_MODEL, "transcription_model": "gpt-transcribe"}
 
     @contextmanager
     def connect(self):
@@ -238,12 +239,19 @@ class Store:
             result = [self._observation(row, db) for row in db.execute(sql + " ORDER BY o.updated_at,o.id", params)]
         return result
 
+    def observation_ids(self, asset_id: str) -> set[str]:
+        with self.connect() as db:
+            return {row[0] for row in db.execute(
+                "SELECT id FROM observations WHERE asset_id=? AND archived=0", (asset_id,))}
+
     @staticmethod
     def _observation(row, db) -> dict:
         result = dict(row)
         result["generated"] = json.loads(result["generated"])
         evidence = db.execute("SELECT * FROM evidence_revisions WHERE id=?", (row["evidence_id"],)).fetchone()
         result["evidence"] = Store._evidence(evidence) if evidence else None
+        run = db.execute("SELECT response FROM runs WHERE id=?", (row["evidence_id"],)).fetchone()
+        result["generation_model"] = json.loads(run[0]).get("model") if run else None
         return result
 
     @staticmethod

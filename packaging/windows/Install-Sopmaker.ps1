@@ -154,7 +154,7 @@ try {
     }
     Write-Host "Installed: $InstallDir"
     Write-Host 'Next time, open the Sopmaker shortcut on your desktop.'
-    Write-Host 'In the browser: Setup > enter your own API key > Source files > drop files > Generate draft report.'
+    Write-Host 'In the browser: Setup > enter your own API key > Add files > drop files > Generate report > Generate draft report.'
     if (-not $NoLaunch) {
         try { Start-Process -FilePath (Join-Path $InstallDir 'Sopmaker.exe') -WorkingDirectory $InstallDir } catch {
             Write-Warning 'Installed successfully. Open the desktop shortcut to start Sopmaker.'
