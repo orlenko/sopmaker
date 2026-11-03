@@ -8,8 +8,10 @@ const node = (tag, text, className) => {
 };
 let state, focused, dirty = false, searchTimer, importing = false, detailSession = 0;
 let lastNoteSignature, lastFileSignature;
-let settingsBaseline = null, settingsSaving = false, setupRequests = 0, notebookBusy = false, notebookListRequest = 0;
+let settingsBaseline = null, settingsSaving = false, setupRequests = 0, pendingNoteSaves = 0, notebookBusy = false, notebookListRequest = 0;
 let createNotebookId = crypto.randomUUID().replaceAll("-", "");
+let setupUncertainInstance = null;
+try { setupUncertainInstance = sessionStorage.getItem("sopmaker-setup-uncertain"); } catch { /* Current-window guard still applies. */ }
 const selected = new Set();
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.has("token")) sessionStorage.setItem("sopmaker-token", hash.get("token"));
@@ -61,17 +63,31 @@ function settingsSnapshot() {
   return JSON.stringify([[...new FormData($("settings-form"))], $("custom-model").value]);
 }
 function unsavedWork() {
-  return dirty || setupRequests > 0 || !!$("api-key").value || (settingsBaseline !== null && settingsSnapshot() !== settingsBaseline);
+  return dirty || !!setupUncertainInstance || pendingNoteSaves > 0 || settingsSaving || setupRequests > 0 || !!$("api-key").value || (settingsBaseline !== null && settingsSnapshot() !== settingsBaseline);
 }
 async function setupApi(path, body) {
+  if (setupUncertainInstance) throw new Error("A Setup change was not confirmed. Do not resubmit it. Finish your work and restart Sopmaker before changing Setup or switching notebooks.");
+  const instance = state?.progress.instance_id;
+  if (!instance) throw new Error("Wait for the notebook to finish opening before changing Setup.");
   setupRequests++;
-  try { return await api(path, body); } finally { setupRequests--; }
+  try { return await api(path, body); }
+  catch (error) {
+    if (!error.status) {
+      setupUncertainInstance = instance;
+      try { sessionStorage.setItem("sopmaker-setup-uncertain", instance); } catch { /* Keep the in-memory guard. */ }
+      throw new Error("A Setup change was not confirmed. Do not resubmit it. Finish your work and restart Sopmaker before changing Setup or switching notebooks.");
+    }
+    throw error;
+  } finally { setupRequests--; }
 }
 function notebookStatus(text) { $("notebook-status").textContent = text; }
 function canLeaveNotebook() {
   if (notebookBusy) return false;
   if (!state || connectionLost || locked() || importing) {
     notebookStatus("Finish importing or processing in this notebook, and confirm its status before opening another."); return false;
+  }
+  if (setupUncertainInstance) {
+    notebookStatus("A Setup change was not confirmed. Do not resubmit it. Finish your work and restart Sopmaker before switching notebooks."); return false;
   }
   if (unsavedWork()) {
     notebookStatus("Save your notes and Setup details, and use or clear any pasted API key before opening another notebook. Wait for any save to finish."); return false;
@@ -85,10 +101,12 @@ function libraryBusy(value) {
 }
 async function loadNotebooks() {
   const requestId = ++notebookListRequest;
+  const originalFocus = document.activeElement;
   notebookStatus("Loading notebooks…");
   try {
     const result = await api("/api/notebooks");
     if (requestId !== notebookListRequest) return;
+    if (result.notebooks.some(item => item.id === createNotebookId)) createNotebookId = crypto.randomUUID().replaceAll("-", "");
     const list = $("notebooks-list"); list.replaceChildren();
     for (const item of result.notebooks) {
       const row = node("div", undefined, "panel notebook-row"), info = node("div");
@@ -104,15 +122,17 @@ async function loadNotebooks() {
     }
     notebookStatus(`${result.notebooks.length} notebook(s) saved on this device.`);
   } catch (error) {
+    if (requestId !== notebookListRequest) return;
     notebookStatus(`${error.message} Refresh the list to check for a notebook created before a lost response.`);
   }
-  if (activeView === "notebooks") $("notebooks-heading").focus();
+  if (requestId === notebookListRequest && activeView === "notebooks" && document.activeElement === originalFocus) $("notebooks-heading").focus();
 }
 async function openNotebook(path, body) {
   if (!canLeaveNotebook()) return;
   libraryBusy(true); notebookStatus("Opening notebook… Your current notebook is kept.");
   try {
     const result = await api(path, body);
+    if (path === "/api/notebooks") createNotebookId = crypto.randomUUID().replaceAll("-", "");
     // Recheck edits made while the local operation was in flight.
     if (unsavedWork() || importing || locked() || connectionLost) {
       notebookStatus("The notebook is available. Save your work and refresh the list to open it."); return;
@@ -343,6 +363,10 @@ async function refresh() {
   if (requestId < appliedRefresh) return;
   if (state?.progress.instance_id === next.progress.instance_id && state.progress.sequence > next.progress.sequence) return;
   appliedRefresh = requestId; state = next; connectionLost = false;
+  if (setupUncertainInstance && setupUncertainInstance !== state.progress.instance_id) {
+    setupUncertainInstance = null;
+    try { sessionStorage.removeItem("sopmaker-setup-uncertain"); } catch { /* Already cleared in memory. */ }
+  }
   if (pendingRun && pendingRun.instanceId === state.progress.instance_id) {
     const pendingId = pendingRun.runId;
     const receipt = state.progress.run_id === pendingId ? state.progress : (await api(`/api/runs/${pendingId}`)).run;
@@ -500,6 +524,7 @@ function renderDetail(note, currentAsset) {
     const submittedGeneration = editGeneration;
     const snapshot = {id: note.id, revision: revisionToken, note: editor.value, state: reviewed.checked ? "reviewed" : "draft", reviewer: reviewer.value};
     save.disabled = true;
+    pendingNoteSaves++;
     try {
       const result = await api("/api/edit", snapshot);
       // Keep this editor's token current without partially mutating the shared
@@ -514,7 +539,7 @@ function renderDetail(note, currentAsset) {
         }
       }
       message(`Note saved: ${result.generated.title} (revision ${result.revision}). The original draft and previous edits are preserved.`);
-    } finally { save.disabled = false; }
+    } finally { pendingNoteSaves--; save.disabled = false; }
   }); body.append(save);
   const evidence = node("details", undefined, "evidence-panel"); evidence.open = true;
   evidence.append(node("summary", "Original evidence and sampled frames")); renderEvidence(evidence, asset); body.append(evidence);
@@ -589,8 +614,15 @@ $("settings-form").onsubmit = event => { event.preventDefault(); action(async ()
   } finally { settingsSaving = false; }
 }); };
 $("key-form").onsubmit = event => { event.preventDefault(); action(async () => {
+  if (!state) throw new Error("Wait for the notebook to finish opening before changing Setup.");
   const key = $("api-key").value; $("api-key").value = "";
-  await setupApi("/api/key", {key, remember: $("remember-key").checked}); await refresh(); message("Key configured. It will be checked when you explicitly process evidence.");
+  try {
+    await setupApi("/api/key", {key, remember: $("remember-key").checked});
+  } catch (error) {
+    if (error.status && !$("api-key").value) $("api-key").value = key;
+    throw error;
+  }
+  await refresh(); message("Key configured. It will be checked when you explicitly process evidence.");
 }); };
 for (const [id, path] of [["load-key", "load"], ["clear-key", "clear"], ["forget-key", "forget"]]) $(id).onclick = () => action(async () => { await setupApi(`/api/key/${path}`, {}); await refresh(); message("Credential setting updated."); });
 $("export").onclick = () => action(async () => {

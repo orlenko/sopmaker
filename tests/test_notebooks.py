@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -106,8 +106,9 @@ def test_unavailable_notebook_is_not_repaired_or_replaced(store):
     with library_for(store) as library:
         library.create(notebook_id, "Damaged fixture")
         path = library.directory / notebook_id
-    with sqlite3.connect(path / "inspection.sqlite3") as db:
-        db.execute("DROP TABLE revisions")
+    with closing(sqlite3.connect(path / "inspection.sqlite3")) as db:
+        with db:
+            db.execute("DROP TABLE revisions")
     before = (path / "inspection.sqlite3").read_bytes()
     with library_for(store) as library:
         assert not library.notebooks("default")[1]["available"]
@@ -197,6 +198,8 @@ def test_static_symlinks_are_not_followed(store, tmp_path, entry):
         library.create(notebook_id, "Linked fixture")
     path = store.root / ".notebooks" / notebook_id
     location = store.root / entry if entry == ".notebooks" else path / entry
+    if entry == ".sopmaker.lock":
+        location.touch(exist_ok=True)  # Windows FileLock may remove this optional file on release.
     moved = location.with_name(location.name + ".retained")
     location.rename(moved)
     try:
@@ -235,6 +238,13 @@ def test_shutdown_cancels_before_handler_drain_and_holds_writer_lease(store, pho
         notebook_id = uuid.uuid4().hex
         library.create(notebook_id, "Closing fixture")
         child = library.servers[notebook_id][0]
+        # A recoverable start failure leaves an unstarted Thread on this engine.
+        store.import_file(photo)
+        with monkeypatch.context() as patch:
+            patch.setattr(threading.Thread, "start", lambda _: (_ for _ in ()).throw(RuntimeError("invented start failure")))
+            with pytest.raises(RuntimeError):
+                library.parent.engine.start()
+        assert library.parent.engine.thread.ident is None
         child.engine.provider_factory = Held
         child.store.import_file(photo)
         child.engine.start()
@@ -341,3 +351,55 @@ def test_windows_junction_container_is_refused(store, tmp_path):
             assert list(target.iterdir()) == []
         finally:
             library.directory.rmdir()  # Removes only the junction, never its target.
+
+
+def test_launcher_cleanup_does_not_depend_on_console_output(tmp_path, photo, monkeypatch):
+    import signal
+    import sys
+
+    import sopmaker.app as application
+
+    started = threading.Event()
+    closing = threading.Event()
+    observed = []
+    root = tmp_path / "launcher-workspace"
+
+    class Held(FakeProvider):
+        def draft(self, *args):
+            started.set()
+            engine = observed[0]
+            assert engine.cancelled.wait(5)
+            with pytest.raises(Timeout):
+                FileLock(root / ".sopmaker.lock").acquire(timeout=0)
+            return super().draft(*args)
+
+    class ClosedConsole:
+        def write(self, text):
+            if closing.is_set():
+                raise BrokenPipeError("invented closed output")
+            return len(text)
+
+        def flush(self):
+            if closing.is_set():
+                raise BrokenPipeError("invented closed output")
+
+    def serve(self, **_):
+        self.credentials.set("invented-main-key")
+        self.engine.provider_factory = Held
+        self.store.import_file(photo)
+        observed.append(self.engine)
+        self.engine.start()
+        assert started.wait(5)
+        closing.set()
+        raise KeyboardInterrupt
+
+    previous_signal = signal.getsignal(signal.SIGINT)
+    monkeypatch.setattr(sys, "stdout", ClosedConsole())
+    monkeypatch.setattr(ReviewServer, "serve_forever", serve)
+    monkeypatch.setattr(application, "log_directory", lambda: tmp_path / "logs")
+    application.main(["serve", "--no-open", "--workspace", str(root)])
+    assert not observed[0].thread.is_alive()
+    assert observed[0].progress["state"] == "cancelled"
+    assert signal.getsignal(signal.SIGINT) == previous_signal
+    with FileLock(root / ".sopmaker.lock").acquire(timeout=0):
+        pass

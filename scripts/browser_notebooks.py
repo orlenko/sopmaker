@@ -61,7 +61,31 @@ async def check(library):
         await expect(old.get_by_label("Edit the note before using it in your report")).to_have_value("Correction in original notebook")
         await old.get_by_role("button", name="Save note", exact=True).click()
         await expect(old.locator("#message")).to_contain_text("revision 2")
-        assert library.parent.store.observations()[0]["note"] == "Correction in original notebook"
+        assert any(note["note"] == "Correction in original notebook" for note in library.parent.store.observations())
+
+        # Pending note saves remain guarded even after switching editors.
+        save_entered, save_release = asyncio.Event(), asyncio.Event()
+
+        async def held_note(route):
+            save_entered.set()
+            await save_release.wait()
+            await route.continue_()
+
+        async def accept_dialog(dialog):
+            await dialog.accept()
+
+        await old.route("**/api/edit", held_note)
+        await old.get_by_label("Edit the note before using it in your report").fill("Pending original correction")
+        await old.get_by_role("button", name="Save note", exact=True).click()
+        await asyncio.wait_for(save_entered.wait(), timeout=5)
+        old.once("dialog", accept_dialog)
+        await old.get_by_role("button", name="Second invented observation").click()
+        await old.get_by_role("button", name="Notebooks", exact=True).click()
+        await old.get_by_role("button", name=re.compile(r"^Open Second inspection")).click()
+        await expect(old.locator("#notebook-status")).to_contain_text("Wait for any save")
+        save_release.set()
+        await expect(old.locator("#message")).to_contain_text("revision 3")
+        await old.unroute("**/api/edit", held_note)
 
         await old.get_by_role("button", name="Setup", exact=True).click()
         await old.locator('[name="context"]').fill("Unsaved inspection context")
@@ -118,6 +142,81 @@ async def check(library):
         await expect(page.locator("#current-notebook")).to_be_visible()
         assert await page.title() == "Uncertain inspection · Sopmaker"
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        # A confirmed creation with withheld navigation ends that request ID.
+        await page.get_by_role("button", name="Notebooks", exact=True).click()
+        await page.get_by_label("New notebook name", exact=True).fill("Created while editing")
+        create_entered, create_release = asyncio.Event(), asyncio.Event()
+
+        async def held_creation(route):
+            create_entered.set()
+            await create_release.wait()
+            await route.continue_()
+
+        await page.route("**/api/notebooks", held_creation)
+        await page.get_by_role("button", name="New notebook", exact=True).click()
+        await asyncio.wait_for(create_entered.wait(), timeout=5)
+        await page.get_by_role("button", name="Setup", exact=True).click()
+        await page.locator('[name="context"]').fill("Keep these details")
+        create_release.set()
+        await expect(page.locator("#notebook-status")).to_contain_text("Save your work")
+        await page.unroute("**/api/notebooks", held_creation)
+        await page.get_by_role("button", name="Save details", exact=True).click()
+        await expect(page.locator("#message")).to_contain_text("Notebook details saved")
+        await page.get_by_role("button", name="Notebooks", exact=True).click()
+        await page.get_by_label("New notebook name", exact=True).fill("A distinct new inspection")
+        await page.get_by_role("button", name="New notebook", exact=True).click()
+        await expect(page.locator("#current-notebook")).to_have_text("A distinct new inspection")
+        assert len(library.notebooks("default")) == 5
+        await expect(page.locator("#note-count")).to_have_text("0")
+
+        # A lost credential response stays uncertain across reload; no retry.
+        async def lost_key(route):
+            await route.fetch()
+            await route.abort("failed")
+
+        await page.get_by_role("button", name="Setup", exact=True).click()
+        await page.get_by_label("API key", exact=True).fill("invalid invented key with spaces")
+        await page.get_by_role("button", name="Use this key", exact=True).click()
+        await expect(page.locator("#message")).to_contain_text("Enter an API key without spaces")
+        await expect(page.get_by_label("API key", exact=True)).to_have_value("invalid invented key with spaces")
+        await page.route("**/api/key", lost_key)
+        await page.get_by_label("API key", exact=True).fill("invented-uncertain-key")
+        await page.get_by_role("button", name="Use this key", exact=True).click()
+        await expect(page.locator("#message")).to_contain_text("Setup change was not confirmed")
+        await page.unroute("**/api/key", lost_key)
+        await page.get_by_role("button", name="Notebooks", exact=True).click()
+        await page.get_by_role("button", name=re.compile(r"^Open Second inspection")).click()
+        await expect(page.locator("#notebook-status")).to_contain_text("restart Sopmaker")
+        page.once("dialog", accept_dialog)
+        await page.reload()
+        await page.get_by_role("button", name="Notebooks", exact=True).click()
+        await page.get_by_role("button", name=re.compile(r"^Open Second inspection")).click()
+        await expect(page.locator("#notebook-status")).to_contain_text("restart Sopmaker")
+        assert await page.evaluate("sessionStorage.getItem('sopmaker-setup-uncertain')")
+        # Restart only this owned synthetic fixture on its previous port.
+        parsed_port = int(page.url.split(":")[2].split("/")[0])
+        selected_store = next(server.store for server, _, _ in library.servers.values() if server.server_port == parsed_port)
+        await asyncio.to_thread(library.parent.shutdown)
+        await asyncio.to_thread(library.close)
+        fresh_keys = Credentials(False)
+        fresh_store = Store(selected_store.root)
+        with ReviewServer(fresh_store, Engine(fresh_store, fresh_keys), fresh_keys, parsed_port) as fresh:
+            fresh_library = NotebookLibrary(fresh)
+            fresh_thread = threading.Thread(target=fresh.serve_forever, daemon=True)
+            fresh_thread.start()
+            try:
+                page.once("dialog", accept_dialog)
+                await page.goto(fresh.url)
+                await expect(page.locator("#current-notebook")).to_have_text("A distinct new inspection")
+                assert await page.evaluate("sessionStorage.getItem('sopmaker-setup-uncertain')") is None
+                await page.get_by_role("button", name="Notebooks", exact=True).click()
+                await page.get_by_label("New notebook name", exact=True).fill("After fixture restart")
+                await page.get_by_role("button", name="New notebook", exact=True).click()
+                await expect(page.locator("#current-notebook")).to_have_text("After fixture restart")
+            finally:
+                await asyncio.to_thread(fresh.shutdown)
+                fresh_thread.join(5)
+                await asyncio.to_thread(fresh_library.close)
         assert not errors, errors
         await browser.close()
 
@@ -126,6 +225,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sopmaker-library-browser-") as folder:
         store = Store(Path(folder) / "workspace")
         seed_demo(store)
+        original = store.observations()[0]
+        store.add_drafts(original["asset_id"], [original["generated"], original["generated"] | {"title": "Second invented observation"}],
+                         {"mode": "offline_synthetic_pair"}, "fixture-pair")
         store.save_settings({"name": "Original inspection"})
         credentials = Credentials(False)
         credentials.set("invented-browser-key")

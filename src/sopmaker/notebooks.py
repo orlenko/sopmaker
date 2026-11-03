@@ -198,7 +198,7 @@ class NotebookLibrary:
             server.server_close()
         for server, _, _ in opened:
             server.engine.stop()
-            if server.engine.thread:
+            if server.engine.thread and server.engine.thread.ident is not None:
                 server.engine.thread.join()
         for _, _, lease in opened:
             if lease:

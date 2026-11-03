@@ -92,7 +92,6 @@ def main(argv=None):
                     except KeyboardInterrupt:
                         pass
                     finally:
-                        print("Closing Sopmaker: waiting for active requests and workers to finish safely…", flush=True)
                         previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
                         try:
                             library.close()
