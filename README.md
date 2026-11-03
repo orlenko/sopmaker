@@ -83,6 +83,13 @@ switching; finish importing/processing and confirm its status first. The current
 notebook name appears above the work area and in the browser tab. New notebooks
 have independent settings; the API key is shared for the running app session.
 
+In **Setup**, choose the inspection timezone from the city/timezone dropdown.
+New empty notebooks start with the computer's timezone; existing choices,
+including UTC, are preserved. Choose the inspection's location if it differs.
+Displayed offsets are as of opening the page; recording dates determine daylight
+saving. Changes affect future processing or explicit retries, not saved notes
+or earlier reports. If detection is unavailable, Setup clearly asks you to choose.
+
 The default workspace is `~/Documents/Sopmaker/Notebook`. New notebooks live in
 its `.notebooks` subfolder; back up the whole workspace, including hidden files.
 The POC supports 100 notebooks and 16 opened notebooks per launch. Finish work

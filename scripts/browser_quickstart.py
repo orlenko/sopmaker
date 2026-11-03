@@ -106,7 +106,9 @@ def main():
 if __name__ == "__main__":
     from browser_lifecycle import main as lifecycle_main
     from browser_notebooks import main as notebooks_main
+    from browser_timezones import main as timezones_main
 
     main()
     lifecycle_main()
     notebooks_main()
+    timezones_main()

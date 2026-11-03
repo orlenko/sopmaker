@@ -17,6 +17,7 @@ from .exporter import export_notes
 from .media import SUPPORTED
 from .model_settings import MODEL_OPTIONS
 from .store import MAX_FILE_BYTES, Conflict
+from .timezones import timezone_options
 
 WEB = Path(__file__).parent / "web"
 MAX_UPLOAD = MAX_FILE_BYTES
@@ -152,6 +153,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"settings": settings, "assets": assets,
                                             "observations": observations, "progress": progress,
                                             "model_options": MODEL_OPTIONS,
+                                            "timezone_options": timezone_options(), "timezone_origin": store.timezone_origin(),
                                             "diagnostics": self.server.engine.diagnostics.info(),
                                             "credentials": {"configured": bool(self.server.credentials.key), "origin": self.server.credentials.origin}})
             return self._send(503, {"error": "Status changed while it was being read. Check status again; nothing was resubmitted."})
@@ -244,6 +246,7 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self, path, body):
         store, engine, credentials = self.server.store, self.server.engine, self.server.credentials
         if path == "/api/session":
+            store.initialize_timezone(body.get("timezone"))
             return self._send(200, {"ok": True}, headers={"Set-Cookie": f"{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
         if path in ("/api/notebooks", "/api/notebooks/open"):
             if not self.server.library:

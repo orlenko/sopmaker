@@ -59,6 +59,14 @@ def main():
                 with urlopen(Request(f"http://{child.netloc}/api/state",
                                      headers={"Authorization": "Bearer " + parse_qs(child.fragment)["token"][0]}), timeout=10) as blank:
                     assert json.loads(blank.read())["assets"] == []
+                headers = {"Authorization": "Bearer " + parse_qs(child.fragment)["token"][0], "Content-Type": "application/json"}
+                with urlopen(Request(f"http://{child.netloc}/api/session",
+                                     data=b'{"timezone":"America/Toronto"}', headers=headers), timeout=10) as initialized:
+                    assert initialized.status == 200
+                with urlopen(Request(f"http://{child.netloc}/api/state", headers=headers), timeout=10) as snapshot:
+                    selected = json.loads(snapshot.read())
+                    assert selected["settings"]["timezone"] == "America/Toronto"
+                    assert "America/Toronto" in selected["timezone_options"]
             finally:
                 process.terminate()
                 process.wait(timeout=20)

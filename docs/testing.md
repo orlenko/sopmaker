@@ -15,6 +15,13 @@ The Windows matrix also exercises a real directory junction, and packaged smoke
 creates a second notebook with the built executable. These are not a substitute
 for testing the installer and notebook workflow on a Windows desktop.
 
+Quickstart also runs `browser_timezones.py`: a browser with an invented Nepal
+timezone checks persisted computer defaults, native keyboard choice, unsaved
+selection/focus, saved UTC/aliases, unavailable detection and narrow layout.
+Transactional unit/API fixtures exercise explicit-save/startup ordering, imported
+data, and a staged child notebook's timezone before fake processing. Packaged smoke
+initializes that child's zone and checks bundled timezone data, without a model.
+
 Install [uv](https://docs.astral.sh/uv/) and run:
 
 ```sh

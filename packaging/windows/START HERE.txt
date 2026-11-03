@@ -7,6 +7,11 @@ FIRST TIME
    You do not need Python, Git or FFmpeg. The runtime and media tools are bundled.
 3. Sopmaker opens your browser. Keep its small app/console window open while working.
 4. In Setup, enter your own OpenAI API key, notebook name and inspection timezone.
+   Choose the timezone from the city list; no technical timezone ID is needed.
+   New notebooks start with this computer's timezone. Existing choices are kept.
+   Pick the inspection's location if it differs. Offsets are as of opening the
+   page; recording dates determine daylight saving. If detection fails, choose
+   and save the inspection timezone in Setup.
    API billing is separate from ChatGPT. Processing uses your account's API credit.
    Choose Remember only if you want the key saved in Windows Credential Manager.
    On later launches, click Use saved key. Otherwise paste a session-only key.

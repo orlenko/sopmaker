@@ -79,6 +79,9 @@ class Store:
                 for row in db.execute("SELECT * FROM observations").fetchall():
                     self._index(db, row["id"], row["asset_id"], json.loads(row["generated"]), row["note"])
                 db.execute("PRAGMA user_version=2")
+            had_timezone = db.execute("SELECT 1 FROM settings WHERE key='timezone'").fetchone() is not None
+            db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)",
+                       ("_timezone_origin", json.dumps("existing" if had_timezone else "pending")))
             for key, value in self.defaults().items():
                 db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
             # A previous process may have stopped during an API call. Never retry it automatically.
@@ -104,7 +107,33 @@ class Store:
 
     def settings(self) -> dict:
         with self.connect() as db:
-            return {r["key"]: json.loads(r["value"]) for r in db.execute("SELECT * FROM settings")}
+            return {r["key"]: json.loads(r["value"]) for r in db.execute("SELECT * FROM settings WHERE key != '_timezone_origin'")}
+
+    def timezone_origin(self):
+        with self.connect() as db:
+            return json.loads(db.execute("SELECT value FROM settings WHERE key='_timezone_origin'").fetchone()[0])
+
+    def initialize_timezone(self, detected):
+        """Set a computer default once, only for a new, empty, unconfigured notebook."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            origin = json.loads(db.execute("SELECT value FROM settings WHERE key='_timezone_origin'").fetchone()[0])
+            if origin != "pending":
+                return
+            current = json.loads(db.execute("SELECT value FROM settings WHERE key='timezone'").fetchone()[0])
+            if current != "UTC" or db.execute("SELECT 1 FROM assets LIMIT 1").fetchone():
+                origin = "existing"
+            else:
+                try:
+                    if not isinstance(detected, str) or len(detected) > 200:
+                        raise ValueError("Invalid detected timezone")
+                    ZoneInfo(detected)
+                except (KeyError, ValueError, TypeError):
+                    origin = "unavailable"
+                else:
+                    db.execute("UPDATE settings SET value=? WHERE key='timezone'", (json.dumps(detected),))
+                    origin = "computer"
+            db.execute("UPDATE settings SET value=? WHERE key='_timezone_origin'", (json.dumps(origin),))
 
     def save_settings(self, values: dict) -> None:
         if set(values) - set(self.defaults()):
@@ -119,6 +148,8 @@ class Store:
         with self.connect() as db:
             db.executemany("UPDATE settings SET value=? WHERE key=?",
                            [(json.dumps(v), k) for k, v in values.items()])
+            if "timezone" in values:
+                db.execute("UPDATE settings SET value=? WHERE key='_timezone_origin'", (json.dumps("chosen"),))
 
     def import_folder(self, folder: Path) -> dict:
         folder = folder.expanduser().resolve()
