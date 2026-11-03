@@ -167,3 +167,61 @@ environment/worktree is not containment for unknown target code.
 Report configured source, installed tooling, metadata inspection, native checks
 and verified adoption separately. This setup cannot claim a full shared gate
 pass while required execution or enforced-review evidence is missing.
+
+## Manual review supplement adoption
+
+On acceptance of this documentation increment, Sopmaker prospectively adopts
+the manual source-process supplement at `orlenko/software-quality`
+`36b0b858b293e14af726e0adf58af476334ccd5d` (3 November 2026):
+[workflow](https://github.com/orlenko/software-quality/blob/36b0b858b293e14af726e0adf58af476334ccd5d/docs/review-workflow.md)
+and [roles](https://github.com/orlenko/software-quality/blob/36b0b858b293e14af726e0adf58af476334ccd5d/docs/review-roles.md).
+[AGENTS](../AGENTS.md) is the discoverable entry point. This source pin is
+separate from every runtime/policy/schema/config/lock/artifact identity above;
+none is advanced or enabled by manual adoption.
+
+Plan independently working increments and record their immutable comparison
+bases, authored line counts and interaction gates. About 500 and fewer than
+1,000 authored changed lines are recommendations, not new merge-size limits.
+A larger coherent increment records its rationale and bounded review plan.
+
+For substantial designs, obtain skeptical general critique before implementation.
+Select and justify specialist lenses separately at design and code stages:
+privacy/security for authentication, secrets and disclosures; data integrity for
+evidence/revisions, concurrency and partial writes; reliability for background
+work, cancellation, timeouts and resource limits; product/accessibility for
+changed workflows, report claims, keyboard and scaled desktop behavior. Selection
+depends on the increment, not a permanent blanket checklist. A relevant unavailable
+lens is incomplete, not inapplicable. Each selected specialist has a separate
+reviewer context and report. The fresh general code bug hunt forms its own
+findings before reading peer conclusions.
+
+The established route is the existing Orchestra collaboration with independently
+commissioned native read-only public-source reviewer contexts. Record actual
+identity/context, exposure, source, rubric, allowed tools/disclosure and inspected
+scope with each report. A named route or fresh conversation alone does not prove
+independence, enforcement or permission. If a required context cannot be supplied
+within current authority, preserve the gap; do not switch services or buy access.
+
+The conductor can coordinate a separate native adjudicator, but cannot adjudicate
+a report it authored. Neither the implementer nor an author of the reports being
+reconciled can be that adjudicator. Escalated disputes belong to project owner
+`orlenko`. Preserve original report/finding IDs and distinct scenarios, group only
+true duplicates, record evidence-based dispositions and fix priority, and keep
+review completeness separate. Valid blockers require correction/removal and
+affected independent re-review; no vote, round limit or summary waives them.
+
+The ongoing owner-approved UI/lifecycle implementation began before this adoption
+dispatch. Its existing general design critiques remain those actual reviews;
+they are not retroactively specialist design passes, fresh code bug hunts or
+separate adjudication. Record remaining reviews against the exact affected source;
+future substantial design changes receive prospective review. Do not invent a
+completed feature walkthrough or rewrite earlier chronology.
+
+Before main integration, retain the full native CI and exact-tree independent
+review required above, including this documentation increment. Check staged
+content/metadata, unchanged runtime pins, finding dispositions and affected fixes.
+Windows 11/125% scaling, assistive technology, Word/report/domain acceptance and
+paid model evaluation remain separate evidence. Manual reviews do not satisfy
+the unavailable enforced `recorded-v1` route or establish a full shared-tool pass.
+Per-increment review/check/source evidence belongs in its PR or durable linked
+record; missing required evidence remains explicit there.
