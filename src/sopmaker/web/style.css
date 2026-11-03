@@ -123,7 +123,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;flex-shri
 .file-state{font-size:12px;color:var(--muted);margin-top:4px}
 .file-error{color:var(--error);font-size:13px;overflow-wrap:anywhere}
 .batch-row-status{font-size:13px;color:var(--muted);min-width:135px}
-.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.setup-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
 .panel label:not(.check-label){display:block;font-weight:600;margin:18px 0 8px}
 .panel input:not([type=checkbox]),.panel select{display:block;width:100%;margin-top:6px}
 .panel textarea{display:block;margin-top:6px}
@@ -198,3 +198,5 @@ main{grid-column:1;grid-row:2;padding:20px 14px 30px;border-left:0;border-radius
 .generate-card{gap:12px}
 h1{font-size:23px}
 }
+
+#inspection-timezone{width:100%;min-width:0}

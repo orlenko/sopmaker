@@ -17,6 +17,8 @@ const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.has("token")) sessionStorage.setItem("sopmaker-token", hash.get("token"));
 history.replaceState(null, "", "/");
 const token = sessionStorage.getItem("sopmaker-token") || "";
+let computerTimezone = null;
+try { computerTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* Setup offers an explicit choice. */ }
 // Pasting a full sign-in link into a window already at / changes only its
 // fragment. Reload so that the new token is consumed by the startup handshake.
 window.addEventListener("hashchange", () => {
@@ -61,6 +63,36 @@ $("choose-folder").onclick = () => $("folder-picker").click();
 
 function settingsSnapshot() {
   return JSON.stringify([[...new FormData($("settings-form"))], $("custom-model").value]);
+}
+function populateTimezones() {
+  const select = $("inspection-timezone"), groups = new Map(), opened = new Date();
+  const ids = new Set(state.timezone_options);
+  ids.add(state.settings.timezone); // Preserve exact saved aliases, including UTC.
+  if (computerTimezone) ids.add(computerTimezone); // The session response validated this alias on the backend.
+  function label(id) {
+    if (id === "UTC") return "UTC — Coordinated Universal Time";
+    const city = id.split("/").at(-1).replaceAll("_", " ");
+    try {
+      const part = kind => new Intl.DateTimeFormat("en", {timeZone: id, timeZoneName: kind}).formatToParts(opened).find(p => p.type === "timeZoneName").value;
+      const offset = part("longOffset").replace("GMT", "UTC");
+      return id.startsWith("Etc/") ? `Fixed offset — ${offset}` : `${city} — ${part("longGeneric")} (${offset})`;
+    } catch { return `${city} — ${id.split("/").slice(0, -1).join(" / ").replaceAll("_", " ") || "Saved timezone"}`; }
+  }
+  const options = [...ids].map(id => ({id, label: label(id)})).sort((a, b) => a.label.localeCompare(b.label));
+  for (const option of options) {
+    const group = option.id === computerTimezone ? "This computer" : option.id === "UTC" ? "Universal time" : !state.timezone_options.includes(option.id) ? "Saved choice" : option.id.split("/")[0].replace("America", "Americas");
+    if (!groups.has(group)) { const element = node("optgroup"); element.label = group; groups.set(group, element); }
+    const element = node("option", option.label); element.value = option.id; groups.get(group).append(element);
+  }
+  select.replaceChildren(...[...groups].sort(([a], [b]) => {
+    const rank = name => name === "This computer" ? 0 : name === "Universal time" ? 1 : name === "Saved choice" ? 2 : 3;
+    return rank(a) - rank(b) || a.localeCompare(b);
+  }).map(([, element]) => element));
+  select.value = state.settings.timezone;
+}
+function updateTimezoneHelp() {
+  const origin = state.timezone_origin === "computer" ? "Started with this computer's timezone. " : state.timezone_origin === "unavailable" ? "Could not detect this computer's timezone; choose the inspection location. " : "Your saved timezone is preserved. ";
+  setText("timezone-help", origin + "Use the inspection's location when recordings have no timezone. Changes affect future processing or explicit retries; saved notes and reports stay unchanged. Offsets are as this page opened; recording dates determine daylight saving. Ambiguous times stay unresolved.");
 }
 function unsavedWork() {
   return dirty || !!setupUncertainInstance || pendingNoteSaves > 0 || settingsSaving || setupRequests > 0 || !!$("api-key").value || (settingsBaseline !== null && settingsSnapshot() !== settingsBaseline);
@@ -377,11 +409,13 @@ async function refresh() {
   $("key-status").textContent = state.credentials.configured ? `Key ready · ${state.credentials.origin.replaceAll("_", " ")}` : "No key configured";
   $("welcome").hidden = !!state.assets.length || state.credentials.configured;
   if (!$("settings-form").dataset.loaded) {
+    populateTimezones();
     for (const [key, value] of Object.entries(state.settings)) if ($("settings-form").elements[key]) $("settings-form").elements[key].value = value;
     const model = state.settings.vision_model;
     if (!state.model_options.some(option => option.id === model)) { $("vision-model-choice").value = "custom"; $("custom-model").value = model; }
     updateModelControl(); $("settings-form").dataset.loaded = "yes"; settingsBaseline = settingsSnapshot();
   }
+  updateTimezoneHelp();
   setText("diagnostic-path", state.diagnostics.path ? `Local log: ${state.diagnostics.path}` : "Persistent logging is not enabled in this session.");
   $("diagnostic-warning").hidden = !state.diagnostics.write_failed;
   const focusedControl = document.activeElement?.dataset.focusKey;
@@ -634,7 +668,12 @@ $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeou
 $("state-filter").onchange = () => renderNotes(); $("show-archived").onchange = () => action(refresh);
 $("file-search").oninput = () => renderFiles();
 window.addEventListener("beforeunload", event => { if (unsavedWork()) { event.preventDefault(); event.returnValue = ""; } });
-action(async () => { await api("/api/session", {}); await refresh(); if (!state.assets.length) view(state.credentials.configured ? "evidence" : "setup"); });
+action(async () => {
+  const session = await api("/api/session", {timezone: computerTimezone});
+  computerTimezone = session.computer_timezone; await refresh();
+  if (!state.assets.length) view(state.credentials.configured && state.timezone_origin !== "unavailable" ? "evidence" : "setup");
+  if (state.timezone_origin === "unavailable") message("Choose the inspection timezone in Setup. The computer's timezone could not be detected; UTC is selected until you choose and save.");
+});
 setInterval(async () => {
   if (polling || !(locked() || connectionLost)) return;
   polling = true;
