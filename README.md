@@ -76,9 +76,27 @@ Choose files or a folder in **Add files**. Import copies files locally;
 and extracted audio to OpenAI, using your account's API billing. Failed or
 interrupted files require an explicit retry. Completed stages are cached.
 
-The default workspace is `~/Documents/Sopmaker/Notebook`. To keep a separate
-inspection, start with `--workspace PATH`. Keep workspaces outside the source
-checkout and back them up as inspection data.
+Open **Notebooks**, enter a name, then click **New notebook** for another inspection.
+It starts blank and keeps the previous notebook's files, notes, revisions and
+reports. Use the list to open either notebook. Save notes and Setup changes before
+switching; finish importing/processing and confirm its status first. The current
+notebook name appears above the work area and in the browser tab. New notebooks
+have independent settings; the API key is shared for the running app session.
+
+The default workspace is `~/Documents/Sopmaker/Notebook`. New notebooks live in
+its `.notebooks` subfolder; back up the whole workspace, including hidden files.
+The POC supports 100 notebooks and 16 opened notebooks per launch. Finish work
+and restart Sopmaker to open more. An unavailable notebook is preserved, never
+automatically reset or repaired. Failed creation may leave a `.creating-*` folder;
+keep it for recovery rather than replacing it. CLI users can still select a
+separate library/workspace with `--workspace PATH`. Keep workspaces outside the
+source checkout and application installation folder.
+
+To open the app in another browser on the same computer, use **Copy browser link**.
+The ordinary address-bar URL does not sign in a different browser. Keep the copied
+link private: it grants access to this running app, its notebook library and app
+actions. All notebooks in one launch share this authority; notebook links are not
+separate access controls. Use the launcher for a fresh link after app restart.
 
 ## Processing feedback and diagnostics
 

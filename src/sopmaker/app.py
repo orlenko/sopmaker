@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import signal
 import sys
 import webbrowser
 from pathlib import Path
@@ -12,6 +13,7 @@ from . import __version__
 from .credentials import Credentials
 from .diagnostics import Diagnostics, log_directory
 from .exporter import export_notes
+from .notebooks import NotebookLibrary
 from .server import ReviewServer
 from .store import Store
 from .worker import Engine
@@ -80,16 +82,21 @@ def main(argv=None):
 
                     seed_demo(store)
                 with ReviewServer(store, engine, credentials, args.port) as server:
-                    print(f"Sopmaker {__version__}\nWorkspace: {root}\nOpen: {server.url}", flush=True)
-                    print(f"Diagnostic log: {diagnostics.info()['path']}\nKeep this window open while working.", flush=True)
-                    if not args.no_open:
-                        webbrowser.open(server.url)
+                    library = NotebookLibrary(server)
                     try:
+                        print(f"Sopmaker {__version__}\nWorkspace: {root}\nOpen: {server.url}", flush=True)
+                        print(f"Diagnostic log: {diagnostics.info()['path']}\nKeep this window open while working.", flush=True)
+                        if not args.no_open:
+                            webbrowser.open(server.url)
                         server.serve_forever(poll_interval=0.3)
                     except KeyboardInterrupt:
-                        engine.stop()
-                        if engine.thread:
-                            engine.thread.join(timeout=185)
+                        pass
+                    finally:
+                        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+                        try:
+                            library.close()
+                        finally:
+                            signal.signal(signal.SIGINT, previous)
     except Timeout:
         print("This inspection is already open in another Sopmaker process.", file=sys.stderr)
         raise SystemExit(1) from None

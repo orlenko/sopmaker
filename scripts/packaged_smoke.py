@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -51,13 +52,20 @@ def main():
                 assert len(state["observations"]) == 1
                 assert not state["credentials"]["configured"]
                 assert b"Review notes" in urlopen(origin, timeout=10).read()
+                with urlopen(Request(origin + "/api/notebooks",
+                                     data=json.dumps({"id": uuid.uuid4().hex, "name": "Packaged second notebook"}).encode(),
+                                     headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"}), timeout=10) as created:
+                    child = urlparse(json.loads(created.read())["url"])
+                with urlopen(Request(f"http://{child.netloc}/api/state",
+                                     headers={"Authorization": "Bearer " + parse_qs(child.fragment)["token"][0]}), timeout=10) as blank:
+                    assert json.loads(blank.read())["assets"] == []
             finally:
                 process.terminate()
                 process.wait(timeout=20)
         subprocess.run([executable, "export", "--workspace", str(workspace), "--include-drafts"],
                        env=environment, check=True, timeout=30, capture_output=True)
         assert list((workspace / "exports").glob("*.zip"))
-    print("Packaged version, startup, PyAV import, synthetic workspace, local server and export checks passed.")
+    print("Packaged version, startup, PyAV import, synthetic workspace, notebook creation, local server and export checks passed.")
 
 
 if __name__ == "__main__":

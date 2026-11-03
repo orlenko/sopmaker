@@ -6,6 +6,7 @@ import mimetypes
 import re
 import secrets
 import tempfile
+from contextlib import nullcontext
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,6 +28,7 @@ class ReviewServer(ThreadingHTTPServer):
     def __init__(self, store, engine, credentials, port: int = 0):
         super().__init__(("127.0.0.1", port), Handler)
         self.store, self.engine, self.credentials = store, engine, credentials
+        self.library = None
         self.token = secrets.token_urlsafe(32)
         self.cookie_name = "sopmaker_" + self.token[:12]
         self.origin = f"http://127.0.0.1:{self.server_port}"
@@ -105,7 +107,10 @@ class Handler(BaseHTTPRequestHandler):
                 mime = {"index.html": "text/html", "app.js": "application/javascript", "style.css": "text/css"}[name]
                 return self._send(200, (WEB / name).read_bytes(), mime)
             if not self._authorized():
-                return self._send(403, {"error": "Open this window from the Sopmaker launcher to start a session."})
+                return self._send(403, {"error": "Open this window from the Sopmaker launcher to start a session. For another browser, use Copy browser link in an open Sopmaker window, or the complete Open link in the launcher console. The address-bar URL alone does not sign you in."})
+            if self.server.library:
+                with self.server.library.admission():
+                    pass
             if self.command == "GET":
                 return self._get(path)
             if self.command == "PUT" and path.path == "/api/files":
@@ -128,6 +133,12 @@ class Handler(BaseHTTPRequestHandler):
     def _get(self, path):
         store = self.server.store
         query = parse_qs(path.query)
+        if path.path == "/api/browser-link":
+            return self._send(200, {"url": self.server.url})
+        if path.path == "/api/notebooks":
+            if not self.server.library:
+                raise ValueError("Use the Sopmaker launcher to open the notebook library.")
+            return self._send(200, {"notebooks": self.server.library.notebooks(self.server.notebook_id)})
         if path.path == "/api/state":
             settings = store.settings()
             # A terminal snapshot must not accompany notes/assets read before
@@ -234,6 +245,12 @@ class Handler(BaseHTTPRequestHandler):
         store, engine, credentials = self.server.store, self.server.engine, self.server.credentials
         if path == "/api/session":
             return self._send(200, {"ok": True}, headers={"Set-Cookie": f"{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
+        if path in ("/api/notebooks", "/api/notebooks/open"):
+            if not self.server.library:
+                raise ValueError("Use the Sopmaker launcher to open the notebook library.")
+            library = self.server.library
+            url = library.create(body.get("id"), body.get("name")) if path == "/api/notebooks" else library.open(body.get("id"))
+            return self._send(200, {"url": url})
         if path == "/api/settings":
             store.save_settings(body)
         elif path == "/api/key":
@@ -248,8 +265,9 @@ class Handler(BaseHTTPRequestHandler):
             intent = body.get("intent", "new" if body.get("generate_report") is True else "retry")
             if intent not in ("new", "retry"):
                 raise ValueError("Choose new-file generation or an explicit retry.")
-            result = engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True,
-                                  run_id=body.get("run_id"), new_only=intent == "new")
+            with self.server.library.admission() if self.server.library else nullcontext():
+                result = engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True,
+                                      run_id=body.get("run_id"), new_only=intent == "new")
             return self._send(200, {"run": result})
         elif path == "/api/cancel":
             if not isinstance(body.get("run_id"), str):

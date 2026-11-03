@@ -35,8 +35,16 @@ If no observations are generated, review the original sources; no empty report
 is presented as a successful inspection.
 
 YOUR FILES
+To start another inspection, choose Notebooks, enter a name and click New notebook.
+Your first notebook is kept. Use the list to reopen it. Save notes and Setup
+details and finish importing/processing before opening another notebook.
+The current notebook name stays visible above the work area and in the browser tab.
+Your API key is available across notebooks for this app session; notebook settings
+are independent. The POC supports 100 saved notebooks and 16 opened per launch.
+Finish work and restart the app to open more. An unavailable notebook is preserved.
+
 Notebooks are in Documents\Sopmaker\Notebook for your Windows account. Back up
-that folder. The app copies originals there, so allow disk space for media and
+that whole folder, including the hidden .notebooks subfolder. The app copies originals there, so allow disk space for media and
 exports. A new batch adds to this notebook; its generated report contains only
 that batch. Use Review notes to build a report from several batches.
 Close the app/console window when finished. Closing only the browser leaves the
@@ -50,6 +58,12 @@ copy may remain in Sopmaker-failed-*. Review these copies before removing them
 manually. Setup does not recursively delete an installed app folder.
 
 TROUBLESHOOTING
+To use Chrome instead of Edge (or another browser on this computer), click
+Copy browser link in Sopmaker, then paste that link into the other browser.
+Copying the ordinary address-bar URL does not sign in a different browser.
+Keep the copied link private: it opens this running app, its notebook library
+and app actions. After restarting Sopmaker, use the launcher for a fresh link.
+
 The bottom status strip is visible on every page. It distinguishes preparation,
 API waits, saving notes, preparing the ZIP and completion/failure. Low activity
 in Task Manager may be normal during an API wait; it does not prove progress.
