@@ -100,7 +100,6 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         await page.evaluate("refresh()")
         await expect(opener).to_be_focused()
         await opener.press("Enter")
-        await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
         editor = page.get_by_label("Edit the note before using it in your report")
         await expect(editor).to_be_focused()
         await editor.fill("Unsaved fixture correction while report is packaging")

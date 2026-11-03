@@ -46,7 +46,9 @@ stdout compatibility, same-ID concurrent admission replay, stale new-file
 eligibility and a completion between database/status reads. A controlled blocked
 sink verifies successful/cancelled work, next admission, memory download, bounded
 queue/drop accounting and bounded close without thread growth; sink-start failure
-also stays nonfatal. Browser checks retain the next batch preview and focus across
+also stays nonfatal. A subprocess fills a real undrained stderr pipe and verifies
+bounded close and clean interpreter exit with raw-descriptor console output.
+Browser checks retain the next batch preview and focus across
 polls, and hold an old acknowledgement while a newer request remains unadmitted
 and survives reload.
 Fake-client checks bind exact Sol/Terra reasoning/output options and legacy/custom

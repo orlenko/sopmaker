@@ -85,6 +85,14 @@ class Diagnostics:
         self.pending = queue.Queue(maxsize=128)
         self.stopping = threading.Event()
         self.writer = None
+        self.console_fd = None
+        if self.console:
+            try:
+                # A daemon must never hold CPython's process-global buffered
+                # stderr lock into interpreter finalization. Own a raw duplicate.
+                self.console_fd = os.dup(sys.stderr.fileno())
+            except (OSError, ValueError, AttributeError):
+                self.write_failed = True
         if self.console or self.directory is not None:
             try:
                 self.writer = threading.Thread(target=self._drain, name="sopmaker-diagnostics", daemon=True)
@@ -92,6 +100,9 @@ class Diagnostics:
             except Exception:
                 self.writer = None
                 self.write_failed = True
+                if self.console_fd is not None:
+                    os.close(self.console_fd)
+                    self.console_fd = None
 
     def emit(self, event, **fields):
         # Diagnostics must never alter processing or publication outcomes.
@@ -121,23 +132,37 @@ class Diagnostics:
             self.dropped_events += 1
 
     def _drain(self):
-        while not (self.stopping.is_set() and self.pending.empty()):
-            try:
-                line = self.pending.get(timeout=0.05)
-            except queue.Empty:
-                continue
-            try:
-                # No memory/counter/worker locks are held across sink I/O.
-                self._write(line)
-            except Exception:
-                self._failed()
-            finally:
-                self.pending.task_done()
+        try:
+            while not (self.stopping.is_set() and self.pending.empty()):
+                try:
+                    line = self.pending.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                try:
+                    # No memory/counter/worker locks are held across sink I/O.
+                    self._write(line)
+                except Exception:
+                    self._failed()
+                finally:
+                    self.pending.task_done()
+        finally:
+            if self.console_fd is not None:
+                try:
+                    os.close(self.console_fd)
+                except OSError:
+                    pass
 
     def _write(self, line):
         if self.console:
             try:
-                print(line.rstrip(), file=sys.stderr, flush=True)
+                if self.console_fd is None:
+                    raise OSError("Console unavailable")
+                remaining = memoryview(line.encode("utf-8"))
+                while remaining:
+                    written = os.write(self.console_fd, remaining)
+                    if written <= 0:
+                        raise OSError("Console unavailable")
+                    remaining = remaining[written:]
             except (OSError, ValueError):
                 self._failed()
         if self.directory is not None:

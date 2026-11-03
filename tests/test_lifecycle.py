@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -197,7 +199,7 @@ def test_state_read_retries_a_completion_between_database_and_progress(store, ph
             thread.join(5)
 
 
-def test_cli_stdout_stays_machine_readable_with_console_diagnostics(tmp_path, photo, monkeypatch, capsys):
+def test_cli_stdout_stays_machine_readable_with_console_diagnostics(tmp_path, photo, monkeypatch, capfd):
     from sopmaker import app
 
     credentials = Credentials(False)
@@ -210,13 +212,13 @@ def test_cli_stdout_stays_machine_readable_with_console_diagnostics(tmp_path, ph
     source.mkdir()
     (source / "photo.png").write_bytes(photo.read_bytes())
     app.main(["import", str(source), "--workspace", workspace])
-    assert json.loads(capsys.readouterr().out)["imported"] == 1
+    assert json.loads(capfd.readouterr().out)["imported"] == 1
     app.main(["process", "--workspace", workspace])
-    captured = capsys.readouterr()
+    captured = capfd.readouterr()
     assert json.loads(captured.out)["observations"] == 1
     assert "stage_started" in captured.err and "invented-cli-key" not in captured.err
     app.main(["export", "--include-drafts", "--workspace", workspace])
-    path = capsys.readouterr().out.strip()
+    path = capfd.readouterr().out.strip()
     assert "\n" not in path and path.endswith(".zip")
 
 
@@ -362,6 +364,47 @@ def test_diagnostic_thread_start_failure_stays_memory_only(tmp_path, monkeypatch
     assert diagnostics.writer is None and diagnostics.pending.qsize() == 0
     assert result["log_write_failed"] and result["dropped_events"] == 1
     assert result["events"][0]["event"] == "app_started"
+
+
+def test_real_undrained_stderr_pipe_allows_clean_subprocess_exit(tmp_path):
+    script = """
+import os,time
+if os.name == 'posix':
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+from sopmaker.diagnostics import Diagnostics
+d = Diagnostics(console=True)
+counts = [0, 0]
+original = d._write
+def traced(line):
+    counts[0] += 1
+    original(line)
+    counts[1] += 1
+d._write = traced
+for index in range(50000):
+    d.emit('waiting', model='gpt-6.1-sol', run_id='a'*32, elapsed_s=index)
+    if index % 100 == 0:
+        time.sleep(0.001)
+assert counts[0] > counts[1] and d.pending.full(), (counts, d.pending.qsize())
+started = time.monotonic()
+d.close(timeout=0.01)
+assert time.monotonic() - started < 0.3
+assert d.writer.is_alive() and d.download()['log_write_failed']
+print('clean exit with blocked raw stderr', flush=True)
+"""
+    process = subprocess.Popen([sys.executable, "-c", script], cwd=tmp_path,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        # Deliberately do not drain stderr until after interpreter termination.
+        process.wait(timeout=10)
+        output, errors = process.communicate(timeout=2)
+        assert process.returncode == 0, errors[-1000:]
+        assert b"clean exit with blocked raw stderr" in output
+        assert b"_enter_buffered_busy" not in errors
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_diagnostic_and_receipt_routes_require_current_session(store):
