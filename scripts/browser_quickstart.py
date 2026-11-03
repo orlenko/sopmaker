@@ -54,7 +54,7 @@ def main():
                     expect(page.locator("#key-status")).to_contain_text("session")
                     # Existing notes must not slip into this batch's automatic report.
                     seed_demo(store)
-                    page.get_by_role("button", name="Source files", exact=False).click()
+                    page.get_by_role("button", name="Add files", exact=False).click()
                     photo = root / "dropped.png"
                     Image.new("RGB", (80, 80), "blue").save(photo)
                     data = base64.b64encode(photo.read_bytes()).decode()
@@ -66,12 +66,13 @@ def main():
                     }""", data)
                     expect(page.locator("#message")).to_contain_text("Imported 1 file(s) locally")
                     assert len(store.observations()) == 1  # Import made no model call.
+                    page.get_by_role("button", name="Generate report", exact=False).first.click()
                     page.get_by_role("button", name="Generate draft report", exact=True).click()
                     download_link = page.get_by_role("link", name="Download draft report")
                     expect(download_link).to_be_visible(timeout=15000)
                     # Reloading keeps a completed report available; no new API request.
                     page.reload()
-                    page.get_by_role("button", name="Source files", exact=False).click()
+                    page.get_by_role("button", name="Generate report", exact=False).first.click()
                     expect(download_link).to_be_visible()
                     with page.expect_download() as pending:
                         download_link.click()
@@ -87,6 +88,7 @@ def main():
                     bad.write_bytes(b"Invented corrupt media")
                     page.locator("#file-picker").set_input_files(str(bad))
                     expect(page.locator("#message")).to_contain_text("Imported 1 file(s) locally")
+                    page.get_by_role("button", name="Generate report", exact=False).first.click()
                     page.get_by_role("button", name="Generate draft report", exact=True).click()
                     expect(page.locator("#report-result")).to_contain_text("file failed", timeout=15000)
                     expect(download_link).to_have_count(0)
@@ -102,4 +104,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from browser_lifecycle import main as lifecycle_main
+
     main()
+    lifecycle_main()

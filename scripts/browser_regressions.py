@@ -68,12 +68,12 @@ async def check(first, second, store, note_id, root):
         await asyncio.wait_for(held.wait(), timeout=5)
         await editor.fill("Newer edit typed while the request was pending")
         release.set()
-        await expect(page.get_by_role("status")).to_contain_text("revision 3")
+        await expect(page.locator("#message")).to_contain_text("revision 3")
         await expect(editor).to_have_value("Newer edit typed while the request was pending")
         await expect(page.locator(".save-status")).to_contain_text("newer changes are still unsaved")
         await page.unroute("**/api/edit", hold_post)
         await save.click()
-        await expect(page.get_by_role("status")).to_contain_text("revision 4")
+        await expect(page.locator("#message")).to_contain_text("revision 4")
         assert next(o for o in store.observations() if o["id"] == note_id)["note"] == "Newer edit typed while the request was pending"
 
         # Typing during the later refresh is a separate race from the POST itself.
@@ -90,11 +90,11 @@ async def check(first, second, store, note_id, root):
         await asyncio.wait_for(held.wait(), timeout=5)
         await editor.fill("Typed during delayed refresh")
         release.set()
-        await expect(page.get_by_role("status")).to_contain_text("revision 5")
+        await expect(page.locator("#message")).to_contain_text("revision 5")
         await expect(editor).to_have_value("Typed during delayed refresh")
         await page.unroute("**/api/state?*", hold_refresh)
         await save.click()
-        await expect(page.get_by_role("status")).to_contain_text("revision 6")
+        await expect(page.locator("#message")).to_contain_text("revision 6")
 
         # Switching notes while a save is pending cannot replace the new editor.
         held, release = asyncio.Event(), asyncio.Event()
@@ -106,13 +106,13 @@ async def check(first, second, store, note_id, root):
         await page.get_by_role("button", name="Second synthetic observation").click()
         await editor.fill("Unsaved text in the second note")
         release.set()
-        await expect(page.get_by_role("status")).to_contain_text("revision 7")
+        await expect(page.locator("#message")).to_contain_text("revision 7")
         await expect(page.locator("#detail h2")).to_have_text("Second synthetic observation")
         await expect(editor).to_have_value("Unsaved text in the second note")
         await expect(page.locator(".save-status")).to_contain_text("Unsaved changes")
         await page.unroute("**/api/edit", hold_post)
         await save.click()
-        await expect(page.get_by_role("status")).to_contain_text("Second synthetic observation (revision 2)")
+        await expect(page.locator("#message")).to_contain_text("Second synthetic observation (revision 2)")
 
         # Old reviewed notes display/export their own transcript, while source review
         # independently exposes the latest complete transcript of the same recording.
@@ -130,9 +130,9 @@ async def check(first, second, store, note_id, root):
             assert "Earlier invented account." in index and "Later invented account." not in index
 
         # Review a narrated source that produced zero observations.
-        await page.get_by_role("button", name="Source files", exact=False).click()
+        await page.get_by_role("button", name="Add files", exact=False).click()
         await page.get_by_role("searchbox", name="Search source files").fill("Z-22")
-        await expect(page.locator(".file-row")).to_have_count(1)
+        await expect(page.locator("#files-list .file-row")).to_have_count(1)
         await page.get_by_role("button", name="Review source invented-narration.wav", exact=True).click()
         await expect(page.locator("#source-detail")).to_contain_text("Invented source narration: unit Z-22")
         await expect(page.locator("#source-detail audio")).to_have_count(1)

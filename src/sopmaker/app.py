@@ -10,6 +10,7 @@ from filelock import FileLock, Timeout
 
 from . import __version__
 from .credentials import Credentials
+from .diagnostics import Diagnostics, log_directory
 from .exporter import export_notes
 from .server import ReviewServer
 from .store import Store
@@ -55,7 +56,9 @@ def main(argv=None):
         with lock.acquire(timeout=0):
             store = Store(root)
             credentials = Credentials()
-            engine = Engine(store, credentials)
+            diagnostics = Diagnostics(log_directory(), console=True)
+            diagnostics.emit("app_started")
+            engine = Engine(store, credentials, diagnostics=diagnostics)
             if args.command == "import":
                 print(json.dumps(store.import_folder(args.folder), indent=2))
             elif args.command == "process":
@@ -79,6 +82,7 @@ def main(argv=None):
                     seed_demo(store)
                 with ReviewServer(store, engine, credentials, args.port) as server:
                     print(f"Sopmaker {__version__}\nWorkspace: {root}\nOpen: {server.url}", flush=True)
+                    print(f"Diagnostic log: {diagnostics.info()['path']}\nKeep this window open while working.", flush=True)
                     if not args.no_open:
                         webbrowser.open(server.url)
                     try:

@@ -22,6 +22,8 @@ def main():
     subprocess.run([executable, "--version"], env=environment, check=True, timeout=30)
     with tempfile.TemporaryDirectory(prefix="sopmaker-packaged-") as directory:
         root = Path(directory)
+        environment["LOCALAPPDATA"] = str(root / "AppData")
+        environment["XDG_STATE_HOME"] = str(root / "State")
         log = root / "startup.log"
         workspace = root / "Unicode workspace é"  # Exercise Windows path/space handling.
         with log.open("w", encoding="utf-8") as output:
@@ -48,7 +50,7 @@ def main():
                 state = json.loads(response.read())
                 assert len(state["observations"]) == 1
                 assert not state["credentials"]["configured"]
-                assert b"Observations" in urlopen(origin, timeout=10).read()
+                assert b"Review notes" in urlopen(origin, timeout=10).read()
             finally:
                 process.terminate()
                 process.wait(timeout=20)

@@ -78,6 +78,27 @@ def test_unknown_exception_text_is_not_exposed():
     assert "invented-secret" not in safe_error(RuntimeError("invented-secret"))
 
 
+@pytest.mark.parametrize("model,effort,cap", [
+    ("gpt-6.1-sol", "low", 12000), ("gpt-6.1-terra", "low", 12000),
+    ("gpt-5.4-mini", None, 6000), ("custom-model", None, 6000),
+])
+def test_exact_curated_request_policy_is_recorded_without_changing_custom(model, effort, cap, tmp_path):
+    captured = {}
+
+    def respond(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(status="completed", output_text='{"observations":[]}',
+                               id="fixture", model=model, usage=None)
+
+    provider = object.__new__(OpenAIProvider)
+    provider.client = SimpleNamespace(responses=SimpleNamespace(create=respond))
+    _, record = provider.draft({"speech": {"kind": "transcript", "text": "Invented statement."}}, tmp_path, model, "")
+    assert captured["model"] == model and captured["max_output_tokens"] == cap
+    assert captured.get("reasoning", {}).get("effort") == effort
+    assert record["request_options"]["max_output_tokens"] == cap
+    assert captured["store"] is False
+
+
 def test_plaintext_credential_backend_is_rejected(monkeypatch):
     import keyring
 

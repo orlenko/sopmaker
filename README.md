@@ -43,17 +43,19 @@ a self-contained setup package, with no Python, Git, or FFmpeg setup required:
    It installs for the current user and creates desktop and Start menu shortcuts;
    administrator rights are not needed. The browser opens when setup finishes.
 3. In **Setup**, enter your own API key and inspection timezone.
-4. Open **Source files**, drop photos, short videos, voice notes or a folder,
-   then click **Generate draft report**. Extract media ZIPs before importing.
-5. When processing finishes, click **Download draft report**, extract the ZIP,
+4. Open **Add files**, drop photos, short videos, voice notes or a folder.
+   Extract media ZIPs before importing.
+5. Open **Generate report** and click **Generate draft report** once. The button
+   locks immediately; the status strip follows processing and ZIP packaging.
+6. When processing finishes, click **Download draft report**, extract the ZIP,
    and open `notes.docx` or `index.html`. Check and correct the draft before use.
 
 Generating explicitly uses the configured API key and includes unreviewed drafts.
 Each automatic report contains only its processing batch, leaving earlier notes
 in the notebook. A failed/cancelled batch or zero observations produces a visible
-message instead of a report. Retry failed files explicitly, then use selected-note
-export to combine completed notes. The existing **Draft new notes** action and
-review/export workflow are also available.
+message instead of a report. Retry failed files explicitly in **Add files**, then use selected-note
+export to combine completed notes. Retrying one file saves notes; it does not
+automatically rebuild the earlier batch report.
 
 Setup copies the adjacent application to `%LOCALAPPDATA%\Programs\Sopmaker`;
 it does not download code or change saved PowerShell policies. It checks bundled
@@ -69,14 +71,46 @@ folder. Previous app copies are retained beside the installed app as
 Setup never recursively deletes a committed app folder. Review retained copies
 before manually removing them, especially if you previously put data there.
 
-Choose files or a folder in **Source files**. Import copies files locally;
-**Draft new notes** explicitly sends image previews, sampled video frames,
+Choose files or a folder in **Add files**. Import copies files locally;
+**Generate draft report** explicitly sends image previews, sampled video frames,
 and extracted audio to OpenAI, using your account's API billing. Failed or
 interrupted files require an explicit retry. Completed stages are cached.
 
 The default workspace is `~/Documents/Sopmaker/Notebook`. To keep a separate
 inspection, start with `--workspace PATH`. Keep workspaces outside the source
 checkout and back them up as inspection data.
+
+## Processing feedback and diagnostics
+
+A status strip stays visible across Add files, Generate report, Review notes and
+Setup. It distinguishes actual media preparation, transcription/draft API waits,
+saving, ZIP packaging, cleanup and terminal outcomes. File completion and new
+observation counts are separate. There are no invented percentages or time estimates.
+Saved observations can appear before the report download is ready.
+
+If a start response is lost, Sopmaker checks the same run identity without
+resubmitting. **Check status now** is read-only. A missing receipt remains
+uncertain; it is not permission to start the same work again. Keep the app open.
+Browser refresh retains a pending identity when session storage is available.
+Run status/receipts last for this app session only; reopening the app retains
+notes/exports but does not restore a previous running job or last-download link.
+At most 256 run identities are admitted per app session, without eviction/replay;
+finish your work and restart Sopmaker before starting more.
+
+In **Setup → Troubleshooting**, **Download diagnostics** saves the last 300
+allowlisted events from this app session. It includes stages, elapsed durations,
+internal run/file IDs, known model IDs (custom models are labelled `custom`) and
+safe error/request categories. It excludes media, narration, notes, API keys,
+filenames, notebook paths and the token-bearing launcher URL. Review before sharing;
+use this download rather than copying the whole launch console.
+
+Console events are also written to `diagnostics.jsonl`, with two rotated backups
+and a 512,000-byte limit per file. Windows uses
+`%LOCALAPPDATA%\Sopmaker\Logs`; macOS uses `~/Library/Logs/Sopmaker`; Linux uses
+`$XDG_STATE_HOME/sopmaker/logs` or `~/.local/state/sopmaker/logs`. An explicitly set
+`XDG_STATE_HOME` also overrides the macOS location. Log writes are coordinated
+across notebook processes; unavailable logging does not fail processing.
+A periodic waiting event confirms local activity only, not provider progress.
 
 ## Try the interface without a key
 
@@ -132,8 +166,16 @@ checks. They contain source/dependency identity and [third-party notices](docs/t
 This is an initial prototype for human review. Model output can be wrong even
 when its source IDs and quotes validate. Use staged, non-identifying material
 for evaluation and agree on permitted services before processing actual lab
-records. Initial defaults are `gpt-5.4-mini` for notes and `gpt-transcribe` for
-audio; model access depends on the user's account and is configurable in Setup.
+records. New notebooks default to `gpt-6.1-sol` for notes and `gpt-transcribe` for
+audio. Setup offers Sol, Terra, the previous Mini option, and an advanced custom
+model. Existing saved models are preserved; a change affects future explicit
+processing only. Sol/Terra requests use low reasoning and a 12,000-token output
+cap; legacy/custom requests retain their existing 6,000-token shape. These new
+choices have offline request-contract checks, but representative extraction
+accuracy, latency, cost and account access remain unqualified. There is no
+automatic model fallback or paid retry. See the official
+[Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and
+[Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra) specifications.
 
 JPEG/PNG/WebP, common video containers, and voice recordings are supported.
 HEIC, automated SOP ingestion, grouping/merging observations, and manual
