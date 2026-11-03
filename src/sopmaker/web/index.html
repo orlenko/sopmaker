@@ -13,6 +13,7 @@
     <div class="sidebar-label">Notebook</div>
     <div class="workspace-name" id="workspace-name">Inspection notebook</div>
     <nav aria-label="Notebook views">
+      <button class="nav" data-view="notebooks"><span aria-hidden="true">▤</span> Notebooks</button>
       <button class="nav" data-view="evidence"><span class="step" aria-hidden="true">1</span> Add files <span id="file-count" class="count">0</span></button>
       <button class="nav" data-view="generate"><span class="step" aria-hidden="true">2</span> Generate report <span id="run-badge" class="count"></span></button>
       <button class="nav active" data-view="notes" aria-current="page"><span class="step" aria-hidden="true">3</span> Review notes <span id="note-count" class="count">0</span></button>
@@ -21,7 +22,16 @@
     <div class="sidebar-bottom">Stored on this device<p>AI processing uses your own OpenAI API account. You choose when it runs.</p></div>
   </aside>
   <main id="main">
+    <div class="notebook-context"><span>Current notebook: <strong id="current-notebook">Inspection notebook</strong></span><button class="text-button" id="copy-browser-link">Copy browser link</button></div>
+    <p class="small">The browser link opens this running app and its notebook library on this computer. Keep it private. Use the launcher again after closing Sopmaker.</p>
+    <label id="browser-link-fallback" hidden>Browser link (keep private)<input id="browser-link" readonly></label>
     <div id="message" role="status" aria-live="polite" hidden></div>
+    <section id="view-notebooks" class="view" hidden>
+      <div class="heading"><div><h1 id="notebooks-heading" tabindex="-1">Notebooks</h1><p>Start another inspection and keep your previous work.</p></div><button class="secondary" id="refresh-notebooks">Refresh list</button></div>
+      <form id="new-notebook-form" class="panel"><h2>New notebook</h2><label>New notebook name<input id="new-notebook-name" required maxlength="120" aria-describedby="notebook-help"></label><p class="help" id="notebook-help">Creates a blank notebook. Existing files, notes and reports are kept in their original notebook. Your API key is available across notebooks for this app session. Nothing is sent to OpenAI.</p><button class="primary" id="new-notebook" type="submit">New notebook</button></form>
+      <p id="notebook-status" role="status" aria-live="polite"></p>
+      <div id="notebooks-list" aria-label="Saved notebooks"></div>
+    </section>
     <section id="view-notes" class="view">
       <div class="heading"><div><h1>Review notes</h1><p>Correct each draft against its evidence, then mark it Reviewed.</p></div><button class="secondary" id="add-files">Add evidence</button></div>
       <div class="toolbar"><label class="search"><input id="search" type="search" placeholder="Search notes, identifiers or narration" aria-label="Search observations"></label><select id="state-filter" aria-label="Review state"><option value="all">All notes</option><option value="draft">Drafts</option><option value="reviewed">Reviewed</option></select><label class="check-label small"><input id="show-archived" type="checkbox"> Previous drafts</label></div>

@@ -8,11 +8,18 @@ const node = (tag, text, className) => {
 };
 let state, focused, dirty = false, searchTimer, importing = false, detailSession = 0;
 let lastNoteSignature, lastFileSignature;
+let settingsBaseline = null, settingsSaving = false, setupRequests = 0, notebookBusy = false, notebookListRequest = 0;
+let createNotebookId = crypto.randomUUID().replaceAll("-", "");
 const selected = new Set();
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.has("token")) sessionStorage.setItem("sopmaker-token", hash.get("token"));
 history.replaceState(null, "", "/");
 const token = sessionStorage.getItem("sopmaker-token") || "";
+// Pasting a full sign-in link into a window already at / changes only its
+// fragment. Reload so that the new token is consumed by the startup handshake.
+window.addEventListener("hashchange", () => {
+  if (new URLSearchParams(location.hash.slice(1)).has("token")) location.reload();
+});
 
 function message(text, error = false, topic = "action") {
   $("message").hidden = false;
@@ -43,11 +50,93 @@ function view(name) {
   for (const section of document.querySelectorAll(".view")) section.hidden = section.id !== `view-${name}`;
   for (const button of document.querySelectorAll(".nav")) { button.classList.toggle("active", button.dataset.view === name); if (button.dataset.view === name) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); }
   renderRun();
+  if (name === "notebooks") action(loadNotebooks);
 }
 document.querySelectorAll("[data-view]").forEach(button => button.onclick = () => view(button.dataset.view));
 $("add-files").onclick = () => view("evidence");
 $("choose-files").onclick = () => $("file-picker").click();
 $("choose-folder").onclick = () => $("folder-picker").click();
+
+function settingsSnapshot() {
+  return JSON.stringify([[...new FormData($("settings-form"))], $("custom-model").value]);
+}
+function unsavedWork() {
+  return dirty || setupRequests > 0 || !!$("api-key").value || (settingsBaseline !== null && settingsSnapshot() !== settingsBaseline);
+}
+async function setupApi(path, body) {
+  setupRequests++;
+  try { return await api(path, body); } finally { setupRequests--; }
+}
+function notebookStatus(text) { $("notebook-status").textContent = text; }
+function canLeaveNotebook() {
+  if (notebookBusy) return false;
+  if (!state || connectionLost || locked() || importing) {
+    notebookStatus("Finish importing or processing in this notebook, and confirm its status before opening another."); return false;
+  }
+  if (unsavedWork()) {
+    notebookStatus("Save your notes and Setup details, and use or clear any pasted API key before opening another notebook. Wait for any save to finish."); return false;
+  }
+  return true;
+}
+function libraryBusy(value) {
+  notebookBusy = value;
+  $("new-notebook").disabled = $("refresh-notebooks").disabled = value;
+  document.querySelectorAll("#notebooks-list button").forEach(button => { button.disabled = value; });
+}
+async function loadNotebooks() {
+  const requestId = ++notebookListRequest;
+  notebookStatus("Loading notebooks…");
+  try {
+    const result = await api("/api/notebooks");
+    if (requestId !== notebookListRequest) return;
+    const list = $("notebooks-list"); list.replaceChildren();
+    for (const item of result.notebooks) {
+      const row = node("div", undefined, "panel notebook-row"), info = node("div");
+      info.append(node("h2", item.name), node("p", item.detail, "small"));
+      if (item.error) info.append(node("p", item.error, "file-error"));
+      row.append(info);
+      if (item.current) row.append(node("span", "Current notebook", "badge"));
+      else if (item.available) {
+        const open = node("button", "Open", "secondary"); open.setAttribute("aria-label", `Open ${item.name} (${item.detail})`); open.disabled = notebookBusy;
+        open.onclick = () => action(() => openNotebook("/api/notebooks/open", {id: item.id})); row.append(open);
+      }
+      list.append(row);
+    }
+    notebookStatus(`${result.notebooks.length} notebook(s) saved on this device.`);
+  } catch (error) {
+    notebookStatus(`${error.message} Refresh the list to check for a notebook created before a lost response.`);
+  }
+  if (activeView === "notebooks") $("notebooks-heading").focus();
+}
+async function openNotebook(path, body) {
+  if (!canLeaveNotebook()) return;
+  libraryBusy(true); notebookStatus("Opening notebook… Your current notebook is kept.");
+  try {
+    const result = await api(path, body);
+    // Recheck edits made while the local operation was in flight.
+    if (unsavedWork() || importing || locked() || connectionLost) {
+      notebookStatus("The notebook is available. Save your work and refresh the list to open it."); return;
+    }
+    location.assign(result.url);
+  } catch (error) {
+    notebookStatus(`${error.message} The notebook may already be saved. Refresh the list before trying again; nothing was resubmitted.`);
+  } finally { libraryBusy(false); }
+}
+$("refresh-notebooks").onclick = () => action(loadNotebooks);
+$("new-notebook-form").onsubmit = event => {
+  event.preventDefault();
+  action(() => openNotebook("/api/notebooks", {id: createNotebookId, name: $("new-notebook-name").value}));
+};
+$("copy-browser-link").onclick = () => action(async () => {
+  const {url} = await api("/api/browser-link");
+  try {
+    await navigator.clipboard.writeText(url);
+    message("Browser link copied. Paste it into another browser on this computer. Keep it private: it opens this app and its notebook library.");
+  } catch {
+    $("browser-link-fallback").hidden = false; $("browser-link").value = url; $("browser-link").focus(); $("browser-link").select();
+    message("Copy the selected browser link manually and keep it private. It opens this app and its notebook library.");
+  }
+});
 
 async function importFiles(files) {
   if (importing) return;
@@ -260,13 +349,14 @@ async function refresh() {
     if (pendingRun?.runId === pendingId && receipt?.run_id === pendingId && receipt.instance_id === pendingRun.instanceId) keepPending(null);
   }
   setText("workspace-name", state.settings.name); setText("note-count", String(state.observations.length)); setText("file-count", String(state.assets.length));
+  setText("current-notebook", state.settings.name); document.title = `${state.settings.name} · Sopmaker`;
   $("key-status").textContent = state.credentials.configured ? `Key ready · ${state.credentials.origin.replaceAll("_", " ")}` : "No key configured";
   $("welcome").hidden = !!state.assets.length || state.credentials.configured;
   if (!$("settings-form").dataset.loaded) {
     for (const [key, value] of Object.entries(state.settings)) if ($("settings-form").elements[key]) $("settings-form").elements[key].value = value;
     const model = state.settings.vision_model;
     if (!state.model_options.some(option => option.id === model)) { $("vision-model-choice").value = "custom"; $("custom-model").value = model; }
-    updateModelControl(); $("settings-form").dataset.loaded = "yes";
+    updateModelControl(); $("settings-form").dataset.loaded = "yes"; settingsBaseline = settingsSnapshot();
   }
   setText("diagnostic-path", state.diagnostics.path ? `Local log: ${state.diagnostics.path}` : "Persistent logging is not enabled in this session.");
   $("diagnostic-warning").hidden = !state.diagnostics.write_failed;
@@ -488,15 +578,21 @@ $("check-status").onclick = () => action(async () => {
 });
 $("vision-model-choice").onchange = updateModelControl;
 $("settings-form").onsubmit = event => { event.preventDefault(); action(async () => {
+  if (settingsSaving) return;
+  settingsSaving = true;
+  const submitted = settingsSnapshot();
   const values = Object.fromEntries(new FormData(event.target));
   if (values.vision_model === "custom") values.vision_model = $("custom-model").value.trim();
-  await api("/api/settings", values); await refresh(); message("Notebook details saved. Model changes apply to future processing only.");
+  try {
+    await setupApi("/api/settings", values); settingsBaseline = submitted;
+    await refresh(); message("Notebook details saved. Model changes apply to future processing only.");
+  } finally { settingsSaving = false; }
 }); };
 $("key-form").onsubmit = event => { event.preventDefault(); action(async () => {
   const key = $("api-key").value; $("api-key").value = "";
-  await api("/api/key", {key, remember: $("remember-key").checked}); await refresh(); message("Key configured. It will be checked when you explicitly process evidence.");
+  await setupApi("/api/key", {key, remember: $("remember-key").checked}); await refresh(); message("Key configured. It will be checked when you explicitly process evidence.");
 }); };
-for (const [id, path] of [["load-key", "load"], ["clear-key", "clear"], ["forget-key", "forget"]]) $(id).onclick = () => action(async () => { await api(`/api/key/${path}`, {}); await refresh(); message("Credential setting updated."); });
+for (const [id, path] of [["load-key", "load"], ["clear-key", "clear"], ["forget-key", "forget"]]) $(id).onclick = () => action(async () => { await setupApi(`/api/key/${path}`, {}); await refresh(); message("Credential setting updated."); });
 $("export").onclick = () => action(async () => {
   if (dirty) { message("Save or discard your unsaved note changes before exporting. Exports use saved revisions.", true); return; }
   const result = await api("/api/export", {ids: [...selected], include_drafts: $("include-drafts").checked});
@@ -505,8 +601,8 @@ $("export").onclick = () => action(async () => {
 $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => action(refresh), 250); };
 $("state-filter").onchange = () => renderNotes(); $("show-archived").onchange = () => action(refresh);
 $("file-search").oninput = () => renderFiles();
-window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
-action(async () => { await api("/api/session", {}); await refresh(); if (!state.credentials.configured && !state.assets.length) view("setup"); });
+window.addEventListener("beforeunload", event => { if (unsavedWork()) { event.preventDefault(); event.returnValue = ""; } });
+action(async () => { await api("/api/session", {}); await refresh(); if (!state.assets.length) view(state.credentials.configured ? "evidence" : "setup"); });
 setInterval(async () => {
   if (polling || !(locked() || connectionLost)) return;
   polling = true;

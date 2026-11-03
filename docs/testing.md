@@ -6,6 +6,15 @@ on a Windows desktop before handing the app to an inspector.
 
 ## Local checks
 
+The quickstart suite includes notebook create/list/open and independent browser
+sessions, with invented evidence and no provider calls. It verifies a blank second
+inspection, retained old-tab edits, unsaved Setup/note protection and recovery when
+creation commits before its response is lost. Unit/API checks cover child writer
+leases, damaged/unowned stores, atomic creation, idempotency and shutdown races.
+The Windows matrix also exercises a real directory junction, and packaged smoke
+creates a second notebook with the built executable. These are not a substitute
+for testing the installer and notebook workflow on a Windows desktop.
+
 Install [uv](https://docs.astral.sh/uv/) and run:
 
 ```sh
