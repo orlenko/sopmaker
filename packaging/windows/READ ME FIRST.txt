@@ -1,0 +1,101 @@
+SOPMAKER 0.2.2 - YOUR FIRST INSPECTION NOTEBOOK
+
+Start here. This package contains the Windows app and installer. The person who
+sent it will provide your API key separately; no key is included in the package.
+Start with a few non-identifying sample photos or short recordings for practice.
+
+1. INSTALL AND OPEN SOPMAKER
+
+- Save the ZIP on your Windows computer. Right-click it and choose Extract All.
+  Open the extracted folder before running anything; do not run from inside ZIP.
+- Double-click Install Sopmaker.cmd. It installs for your Windows account and
+  creates desktop and Start menu shortcuts. You do not need Python, Git, FFmpeg
+  or administrator access.
+- Sopmaker opens your browser. Keep the small app/console window open while you
+  work. Closing that window stops the app; closing only the browser does not.
+- On later days, use the Sopmaker desktop or Start menu shortcut.
+- When updating an older copy, finish processing, save your work and close the
+  old app/console window before running the new installer. Existing notebooks
+  are kept. Do not put inspection files inside the installed application folder.
+
+2. SET UP YOUR FIRST NOTEBOOK
+
+- In the browser, open Setup. Give the notebook a name, such as Practice room.
+- Check Inspection timezone. A new notebook starts with this computer's timezone.
+  Choose the city/timezone where the inspection took place if that is different.
+  You do not need to type a technical identifier. If detection was unavailable,
+  choose the correct timezone from the list. Existing notebook choices are kept.
+- Leave the recommended AI model selected for your first practice run.
+- Click Save details.
+- In Your OpenAI API key, paste the key supplied separately, then click Use this
+  key. Keep the key private; do not put it in a notebook, photo or report.
+- Remember this key on this device is optional. It saves the key in Windows
+  Credential Manager. Without it, paste the key again after closing the app.
+  If you saved it, use Setup > Use saved key on later launches.
+
+3. ADD YOUR INSPECTION FRAGMENTS
+
+- Open Add files. Drop photos, short videos or voice recordings into the box,
+  or use Choose files / Choose folder. If your media came in a ZIP, extract that
+  ZIP first and select its photos/recordings, not the ZIP itself.
+- Start with a small practice batch. You can narrate what you noticed in a video
+  or voice recording. Only include material approved for the intended service.
+- Check that the files appear in the list. Adding files copies them locally;
+  it does not send them to the AI service or start processing.
+
+4. GENERATE YOUR DRAFT REPORT
+
+- Open Generate report. Click Generate draft report once when ready.
+  This sends prepared images/audio to OpenAI using the supplied key.
+- The button locks while work runs. The bottom strip shows stages and elapsed
+  time. Low computer activity can be normal while waiting for the service.
+  Keep Sopmaker open. Notes may appear before the report ZIP is ready.
+- If confirmation is uncertain, use Check status now. It checks the existing
+  request; it does not start the work again. Do not repeatedly submit it.
+- When Download draft report appears, click it and save the report ZIP.
+
+5. OPEN AND CHECK THE REPORT
+
+- Right-click the downloaded report ZIP and choose Extract All.
+- Open notes.docx in Word for the editable draft, or index.html in your browser
+  for the evidence index. Keep the extracted report folder together so its
+  evidence links continue to work.
+- Check every observation against its original evidence and correct mistakes.
+  AI notes start as drafts; they do not make compliance decisions for you.
+- To correct notes inside Sopmaker, use Review notes, open an observation,
+  edit it and click Save note. Enter your reviewer name before marking Reviewed.
+- To make a report from saved notes, select them, enable Include drafts only if
+  you want unreviewed drafts included, then click Export selected.
+- A report download is a snapshot. Saving later corrections in Sopmaker requires
+  a fresh export. Editing a Word document does not change the Sopmaker notebook.
+- If no observations were generated, review the sources. That is not a finding
+  that an inspection passed.
+
+6. START ANOTHER INSPECTION
+
+- Finish processing and save any note or Setup edits.
+- Open Notebooks, enter a New notebook name and click New notebook.
+  The new inspection is blank. Your previous files, notes and reports are kept.
+- Use Notebooks and Open to return to an earlier inspection.
+- Notebook settings are separate. The supplied key is available across notebooks
+  during the same app session; it does not need to be pasted for each notebook.
+
+7. FINISH, BACK UP OR GET HELP
+
+- Save your work and finish/cancel processing before closing the app/console.
+  If you cancel, wait for cancellation to finish; Cancel requested is still busy.
+- Back up the whole Documents\Sopmaker\Notebook folder, including the hidden
+  .notebooks subfolder. Allow disk space for copied originals and report exports.
+- If a key/model error appears, ask the person who supplied your key for help.
+- Failed files are not retried automatically. In Add files, review the problem
+  and use Retry explicitly when appropriate; completed notes remain available.
+- If a Setup change was not confirmed, do not keep submitting it. Follow the
+  displayed instruction to finish work and restart the app before continuing.
+- To use another browser on this computer, use Copy browser link in the app and
+  paste the full link into that browser. The ordinary address-bar URL does not
+  sign in another browser. Keep the full link private; it opens this running app.
+- In Setup > Troubleshooting, Download diagnostics provides recent stage events.
+  Review it before sharing it with the person who sent you Sopmaker. Avoid
+  copying the whole console, which includes your private browser launch link.
+- If Windows or workplace policy blocks the unsigned installer, ask the person
+  who supplied the package or your IT contact. Do not disable security tools.
