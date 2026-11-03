@@ -390,7 +390,7 @@ function renderEvidence(body, asset) {
 }
 function renderDetail(note, currentAsset) {
   const session = ++detailSession;
-  let editGeneration = 0;
+  let editGeneration = 0, revisionToken = note.revision;
   const asset = boundAsset(note, currentAsset);
   const detail = $("detail"); detail.replaceChildren();
   const head = node("div", undefined, "detail-head"); head.append(node("span", note.state, `badge ${note.state}`), node("h2", note.generated.title)); detail.append(head);
@@ -408,12 +408,13 @@ function renderDetail(note, currentAsset) {
   reviewer.oninput = reviewed.onchange = changed;
   const save = node("button", "Save note", "primary"); save.onclick = () => action(async () => {
     const submittedGeneration = editGeneration;
-    const snapshot = {id: note.id, revision: note.revision, note: editor.value, state: reviewed.checked ? "reviewed" : "draft", reviewer: reviewer.value};
+    const snapshot = {id: note.id, revision: revisionToken, note: editor.value, state: reviewed.checked ? "reviewed" : "draft", reviewer: reviewer.value};
     save.disabled = true;
     try {
       const result = await api("/api/edit", snapshot);
-      // Update the revision token without touching any newer text or another editor.
-      note.revision = result.revision;
+      // Keep this editor's token current without partially mutating the shared
+      // observation used by cached list/card closures before refresh completes.
+      revisionToken = result.revision;
       await refresh();
       if (session === detailSession && focused === note.id) {
         if (editGeneration === submittedGeneration) {

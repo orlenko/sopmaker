@@ -114,6 +114,30 @@ async def check(first, second, store, note_id, root):
         await save.click()
         await expect(page.locator("#message")).to_contain_text("Second synthetic observation (revision 2)")
 
+        # Changing the list filter during a post-save refresh cannot cache an
+        # old note body paired with the new revision token.
+        await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
+        await page.get_by_label("Reviewed", exact=True).uncheck()
+        await save.click()
+        await expect(page.locator("#message")).to_contain_text("revision 8")
+        held, release = asyncio.Event(), asyncio.Event()
+        await page.route("**/api/state?*", hold_refresh)
+        await editor.fill("Correction preserved across a filtered delayed refresh")
+        await save.click()
+        await asyncio.wait_for(held.wait(), timeout=5)
+        await page.get_by_label("Review state", exact=True).select_option("draft")
+        release.set()
+        await expect(page.locator("#message")).to_contain_text("revision 9")
+        await page.unroute("**/api/state?*", hold_refresh)
+        await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
+        await expect(editor).to_have_value("Correction preserved across a filtered delayed refresh")
+        await editor.fill("Follow-up correction after reopening the current saved revision")
+        await page.get_by_label("Reviewed", exact=True).check()
+        await save.click()
+        await expect(page.locator("#message")).to_contain_text("revision 10")
+        assert next(o for o in store.observations() if o["id"] == note_id)["note"] == "Follow-up correction after reopening the current saved revision"
+        await page.get_by_label("Review state", exact=True).select_option("all")
+
         # Old reviewed notes display/export their own transcript, while source review
         # independently exposes the latest complete transcript of the same recording.
         await page.get_by_role("button", name="Historical narrated note", exact=False).click()
