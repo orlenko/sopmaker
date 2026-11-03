@@ -275,13 +275,17 @@ function beginRun(assetIds = null) {
   startInFlight = true; $("message").hidden = true; view("generate"); renderRun();
   action(async () => {
     try {
-      const result = await api("/api/process", {asset_ids: ids, generate_report: assetIds === null, run_id: runId});
+      const result = await api("/api/process", {asset_ids: ids, generate_report: assetIds === null, run_id: runId, intent: assetIds === null ? "new" : "retry"});
       if (result.run.run_id === runId && result.run.instance_id === pendingRun?.instanceId) keepPending(null);
       if (result.run.instance_id === state.progress.instance_id && result.run.sequence >= state.progress.sequence) state.progress = result.run;
       connectionLost = false;
       await refresh();
     } catch (error) {
-      if (error.status >= 400 && error.status < 500) { if (pendingRun?.runId === runId) keepPending(null); message(error.message, true); }
+      if (error.status >= 400 && error.status < 500) {
+        if (pendingRun?.runId === runId) keepPending(null);
+        message(error.message, true);
+        try { await refresh(); } catch { /* Reconciliation remains read-only. */ }
+      }
       else if (pendingRun) { message("The start response was not confirmed. Check status; the request has not been resubmitted.", true, "start"); }
       else message(error.message, true);
     } finally { startInFlight = false; renderRun(); }

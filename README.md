@@ -104,7 +104,8 @@ safe error/request categories. It excludes media, narration, notes, API keys,
 filenames, notebook paths and the token-bearing launcher URL. Review before sharing;
 use this download rather than copying the whole launch console.
 
-Console events are also written to `diagnostics.jsonl`, with two rotated backups
+Diagnostics go to stderr so CLI result stdout stays parseable. Console events
+are also written to `diagnostics.jsonl`, with two rotated backups
 and a 512,000-byte limit per file. Windows uses
 `%LOCALAPPDATA%\Sopmaker\Logs`; macOS uses `~/Library/Logs/Sopmaker`; Linux uses
 `$XDG_STATE_HOME/sopmaker/logs` or `~/.local/state/sopmaker/logs`. An explicitly set

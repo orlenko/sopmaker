@@ -100,6 +100,125 @@ def test_thread_start_failure_is_terminal_and_releases_admission(store, photo, m
     assert engine.progress["state"] == "completed"
 
 
+def test_identical_start_paused_before_admission_cannot_replay_a_failed_run(store, photo, monkeypatch):
+    calls, failures = [], []
+    missing, resume = threading.Event(), threading.Event()
+
+    class FailedDraft(ReportProvider):
+        def draft(self, *_):
+            calls.append(1)
+            raise ValueError("invented provider failure")
+
+    store.import_file(photo)
+    aid = store.assets()[0]["id"]
+    engine = engine_for(store, FailedDraft)
+    run_id = uuid.uuid4().hex
+    original_receipt = engine.receipt
+
+    def held_receipt(identity):
+        result = original_receipt(identity)
+        if threading.current_thread().name == "delayed-start" and not missing.is_set():
+            assert result is None
+            missing.set()
+            assert resume.wait(5)
+        return result
+
+    monkeypatch.setattr(engine, "receipt", held_receipt)
+
+    def delayed_start():
+        try:
+            engine.start(asset_ids=[aid], run_id=run_id)
+        except Exception as exc:
+            failures.append(exc)
+
+    late = threading.Thread(target=delayed_start, name="delayed-start")
+    late.start()
+    try:
+        assert missing.wait(5)
+        engine.start(asset_ids=[aid], run_id=run_id)
+        engine.thread.join(5)
+        original = engine.receipt(run_id)
+        assert original["state"] == "failed"
+    finally:
+        resume.set()
+        late.join(5)
+    assert not failures and calls == [1]
+    assert engine.receipt(run_id) == original and not engine.lock.locked()
+
+
+def test_stale_new_batch_does_not_become_an_implicit_retry(store, photo):
+    store.import_file(photo)
+    aid = store.assets()[0]["id"]
+    engine = engine_for(store)
+    for state in ("error", "ready", "interrupted"):
+        store.update_asset(aid, state=state)
+        with pytest.raises(ValueError, match="No work was started"):
+            engine.start(asset_ids=[aid], generate_report=True, new_only=True)
+        assert engine.progress["state"] == "idle" and not engine.lock.locked()
+
+
+@pytest.mark.parametrize("run_id", ["", 0, False, "not-a-run-id", "a" * 33])
+def test_invalid_supplied_run_identity_never_starts_work(store, photo, run_id):
+    store.import_file(photo)
+    engine = engine_for(store)
+    with pytest.raises(ValueError, match="Invalid run identity"):
+        engine.start(run_id=run_id)
+    assert engine.thread is None and not engine.lock.locked()
+
+
+def test_state_read_retries_a_completion_between_database_and_progress(store, photo, monkeypatch):
+    store.import_file(photo)
+    engine = engine_for(store)
+    original = store.observations
+    triggered = False
+
+    def finish_during_read(*args, **kwargs):
+        nonlocal triggered
+        result = original(*args, **kwargs)
+        if not triggered:
+            triggered = True
+            engine.start(generate_report=True)
+            engine.thread.join(5)
+        return result
+
+    monkeypatch.setattr(store, "observations", finish_during_read)
+    with ReviewServer(store, engine, engine.credentials) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            response = urlopen(Request(server.origin + "/api/state", headers={
+                "Authorization": "Bearer " + server.token}), timeout=10)
+            state = json.loads(response.read())
+            assert state["progress"]["state"] == "completed"
+            assert len(state["observations"]) == 1 and state["assets"][0]["state"] == "ready"
+        finally:
+            server.shutdown()
+            thread.join(5)
+
+
+def test_cli_stdout_stays_machine_readable_with_console_diagnostics(tmp_path, photo, monkeypatch, capsys):
+    from sopmaker import app
+
+    credentials = Credentials(False)
+    credentials.set("invented-cli-key")
+    monkeypatch.setattr(app, "Credentials", lambda: credentials)
+    monkeypatch.setattr(app, "log_directory", lambda: tmp_path / "logs")
+    monkeypatch.setattr(app, "Engine", lambda store, key, diagnostics: Engine(store, key, ReportProvider, diagnostics))
+    workspace = str(tmp_path / "cli-workspace")
+    source = tmp_path / "input"
+    source.mkdir()
+    (source / "photo.png").write_bytes(photo.read_bytes())
+    app.main(["import", str(source), "--workspace", workspace])
+    assert json.loads(capsys.readouterr().out)["imported"] == 1
+    app.main(["process", "--workspace", workspace])
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["observations"] == 1
+    assert "stage_started" in captured.err and "invented-cli-key" not in captured.err
+    app.main(["export", "--include-drafts", "--workspace", workspace])
+    path = capsys.readouterr().out.strip()
+    assert "\n" not in path and path.endswith(".zip")
+
+
 def test_cleanup_failure_withholds_report_and_cached_retry_is_explicit(store, photo):
     class BadClose(ReportProvider):
         def close(self):

@@ -41,7 +41,9 @@ Windows display-scaling or assistive-technology acceptance.
 Report/lifecycle tests cover cancellation, zero observations, cached-stage counts,
 export/provider-close/thread-start failures, preserved saved model choices,
 effective request-policy cache invalidation, authenticated diagnostics/receipts,
-redaction of custom model/error/request text, rotation and failed log writes.
+redaction of custom model/error/request text, rotation, failed log writes, CLI
+stdout compatibility, same-ID concurrent admission replay, stale new-file
+eligibility and a completion between database/status reads.
 Fake-client checks bind exact Sol/Terra reasoning/output options and legacy/custom
 compatibility. These use invented media and fake providers, not live model probes.
 

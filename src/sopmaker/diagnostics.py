@@ -91,7 +91,7 @@ class Diagnostics:
                 self.events.append(record)
             if self.console:
                 try:
-                    print(line.rstrip(), flush=True)
+                    print(line.rstrip(), file=sys.stderr, flush=True)
                 except (OSError, ValueError):
                     pass
             if self.directory is not None:

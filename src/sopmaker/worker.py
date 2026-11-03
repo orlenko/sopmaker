@@ -60,8 +60,8 @@ class Engine:
         self.diagnostics.emit(event, **{"run_id": snapshot.get("run_id"), "instance_id": self.instance_id,
                                        "stage": snapshot.get("stage"), **fields})
 
-    def start(self, asset_ids: list[str] | None = None, generate_report: bool = False, run_id=None):
-        run_id = run_id or uuid.uuid4().hex
+    def start(self, asset_ids: list[str] | None = None, generate_report: bool = False, run_id=None, new_only=False):
+        run_id = uuid.uuid4().hex if run_id is None else run_id
         if not isinstance(run_id, str) or not re.fullmatch(r"[a-f0-9]{32}", run_id):
             raise ValueError("Invalid run identity.")
         existing = self.receipt(run_id)
@@ -77,6 +77,12 @@ class Engine:
             raise ValueError("Processing is already running.")
         admitted = False
         try:
+            # A same-ID request may have observed absence before a complete run
+            # acquired and released the lock. Admission must recheck atomically.
+            existing = self.receipt(run_id)
+            if existing:
+                self.lock.release()
+                return existing
             # Never evict an admitted identity and accidentally process it twice.
             if len(self.receipts) >= 256:
                 raise ValueError("This app session has processed 256 runs. Finish your work and restart Sopmaker before starting more.")
@@ -91,6 +97,8 @@ class Engine:
                 assets = [a for a in assets if a["state"] == "imported"]
             if not assets:
                 raise ValueError("Import new files first, or explicitly select files to retry.")
+            if new_only and any(a["state"] != "imported" for a in assets):
+                raise ValueError("These files changed since this window loaded. No work was started. Check status, then use Add files to retry explicitly if needed.")
             with self.publication_lock:
                 self.cancelled.clear()
                 self.run_clock = self.stage_clock = time.monotonic()
@@ -179,7 +187,7 @@ class Engine:
             if generate_report:
                 ids = {asset["id"] for asset in assets}
                 if self.cancelled.is_set() or incomplete:
-                    outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Source files and retry explicitly."}
+                    outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Add files and retry explicitly."}
                 else:
                     notes = [o["id"] for o in self.store.observations() if o["asset_id"] in ids]
                     if notes:
@@ -210,7 +218,7 @@ class Engine:
                     with self.publication_lock:
                         if self.cancelled.is_set():
                             state = "cancelled"
-                            outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Source files and retry explicitly."}
+                            outcome = {"report_error": "Report not generated: processing stopped or a file failed. Review Add files and retry explicitly."}
                         if output is not None and state in ("failed", "cancelled"):
                             try:
                                 output.unlink(missing_ok=True)

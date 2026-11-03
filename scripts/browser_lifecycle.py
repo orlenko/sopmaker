@@ -27,6 +27,9 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         page.on("pageerror", lambda error: errors.append(str(error)))
         await page.goto(server.url)
         await page.get_by_role("button", name="Generate report", exact=False).first.click()
+        stale_window = await context.new_page()
+        await stale_window.goto(server.url)
+        await stale_window.get_by_role("button", name="Generate report", exact=False).first.click()
         held, send = asyncio.Event(), asyncio.Event()
         posts = []
 
@@ -99,6 +102,10 @@ async def check(server, engine, root, draft_entered, finish_draft, zip_entered, 
         await expect(page.locator("#worker-status")).to_have_text("Processing cancelled", timeout=10000)
         assert not engine.progress.get("report_url")
         assert not list((engine.store.root / "exports").glob("*.zip"))
+        await stale_window.get_by_role("button", name="Generate draft report", exact=True).click()
+        await expect(stale_window.locator("#message")).to_contain_text("No work was started")
+        assert len(calls) == 1  # A stale New badge must not authorize paid reprocessing.
+        await stale_window.close()
         page.once("dialog", lambda dialog: dialog.accept())
         await page.get_by_role("button", name="Synthetic example: cabinet label", exact=False).click()
         for width, height in ((1366, 768), (1093, 614), (1024, 640), (600, 900)):

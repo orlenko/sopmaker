@@ -130,12 +130,20 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(path.query)
         if path.path == "/api/state":
             settings = store.settings()
-            return self._send(200, {"settings": settings, "assets": store.assets(),
-                                    "observations": store.observations(query.get("q", [""])[0], query.get("archived") == ["1"]),
-                                    "progress": self.server.engine.progress,
-                                    "model_options": MODEL_OPTIONS,
-                                    "diagnostics": self.server.engine.diagnostics.info(),
-                                    "credentials": {"configured": bool(self.server.credentials.key), "origin": self.server.credentials.origin}})
+            # A terminal snapshot must not accompany notes/assets read before
+            # completion, since the browser stops polling on terminal state.
+            for _ in range(3):
+                before = self.server.engine.progress
+                assets = store.assets()
+                observations = store.observations(query.get("q", [""])[0], query.get("archived") == ["1"])
+                progress = self.server.engine.progress
+                if before["sequence"] == progress["sequence"]:
+                    return self._send(200, {"settings": settings, "assets": assets,
+                                            "observations": observations, "progress": progress,
+                                            "model_options": MODEL_OPTIONS,
+                                            "diagnostics": self.server.engine.diagnostics.info(),
+                                            "credentials": {"configured": bool(self.server.credentials.key), "origin": self.server.credentials.origin}})
+            return self._send(503, {"error": "Status changed while it was being read. Check status again; nothing was resubmitted."})
         if path.path.startswith("/api/runs/"):
             run_id = path.path.rsplit("/", 1)[1]
             if not re.fullmatch(r"[a-f0-9]{32}", run_id):
@@ -237,8 +245,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/key/forget":
             credentials.forget()
         elif path == "/api/process":
+            intent = body.get("intent", "new" if body.get("generate_report") is True else "retry")
+            if intent not in ("new", "retry"):
+                raise ValueError("Choose new-file generation or an explicit retry.")
             result = engine.start(body.get("asset_ids"), generate_report=body.get("generate_report") is True,
-                                  run_id=body.get("run_id"))
+                                  run_id=body.get("run_id"), new_only=intent == "new")
             return self._send(200, {"run": result})
         elif path == "/api/cancel":
             if not isinstance(body.get("run_id"), str):
