@@ -110,6 +110,10 @@ server has its own session cookie, so source and download links remain usable.
 
 ## Testing and portable Windows builds
 
+The pinned [shared quality setup](docs/quality.md) provides an inspection-only
+plan and outside-target invocation. It preserves the full native gates below;
+shared command execution and enforced-review evidence remain unavailable.
+
 ```sh
 uv run ruff check .
 uv run pytest

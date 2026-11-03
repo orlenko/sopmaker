@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "repository": "orlenko/sopmaker",
+  "execution": {
+    "trusted_local": false,
+    "isolation": "unavailable",
+    "checks": [
+      {
+        "id": "ruff",
+        "argv": ["uv", "run", "ruff", "check", "."],
+        "timeout_seconds": 120,
+        "max_log_bytes": 65536,
+        "effects": ["Ruff cache writes; locked environment provisioning is a separate native CI prerequisite."]
+      },
+      {
+        "id": "unit",
+        "argv": ["uv", "run", "pytest"],
+        "timeout_seconds": 300,
+        "max_log_bytes": 131072,
+        "effects": ["Invented disposable images, recordings, SQLite and exports; pytest cache writes; tests clear API configuration and use a null credential backend."]
+      },
+      {
+        "id": "browser-smoke",
+        "argv": ["uv", "run", "python", "scripts/browser_smoke.py"],
+        "timeout_seconds": 300,
+        "max_log_bytes": 65536,
+        "effects": ["Owned temporary notebook/media/export, loopback server and Chromium; invented session key only, no model or OS credential-store calls."]
+      },
+      {
+        "id": "browser-regressions",
+        "argv": ["uv", "run", "python", "scripts/browser_regressions.py"],
+        "timeout_seconds": 300,
+        "max_log_bytes": 65536,
+        "effects": ["Owned temporary notebooks/media/exports, loopback servers and Chromium; fake providers and no real credentials."]
+      },
+      {
+        "id": "browser-quickstart",
+        "argv": ["uv", "run", "python", "scripts/browser_quickstart.py"],
+        "timeout_seconds": 300,
+        "max_log_bytes": 65536,
+        "effects": ["Owned temporary notebook, dropped invented media and draft report, loopback server and Chromium; fake provider and no OS credential-store calls."]
+      },
+      {
+        "id": "windows-credentials",
+        "argv": ["uv", "run", "python", "scripts/windows_credentials_smoke.py", "--allow-credential-store"],
+        "timeout_seconds": 120,
+        "max_log_bytes": 65536,
+        "effects": ["WINDOWS ONLY: creates, reads and deletes an invented credential in a unique synthetic service; real OS credential backend effect, not the app's normal saved-key service."]
+      },
+      {
+        "id": "windows-build",
+        "argv": ["uv", "run", "python", "packaging/build.py"],
+        "timeout_seconds": 600,
+        "max_log_bytes": 262144,
+        "effects": ["WINDOWS CI: requires real Git metadata; writes dist/build, native source archives, licenses and file inventory; may fetch pinned public native sources. Not runnable in a Git-free snapshot."]
+      },
+      {
+        "id": "windows-packaged",
+        "argv": ["uv", "run", "python", "scripts/packaged_smoke.py", "dist/Sopmaker/Sopmaker.exe"],
+        "timeout_seconds": 300,
+        "max_log_bytes": 65536,
+        "effects": ["WINDOWS ONLY: requires the preceding native build; starts/stops its owned packaged app with invented temporary notebooks and a null keyring; no API key or model calls."]
+      },
+      {
+        "id": "windows-setup",
+        "argv": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/windows_install_smoke.ps1", "-SetupDir", "dist/Extracted-Setup"],
+        "timeout_seconds": 600,
+        "max_log_bytes": 131072,
+        "effects": ["WINDOWS ONLY: requires built/copied/zipped/extracted setup; temporary apps, shortcuts, notebooks, junctions and owned processes; per-user LocalAppData setup-lock file. No normal desktop installation, API call, app restart or saved-key access."]
+      }
+    ]
+  },
+  "reviewer": {
+    "protocol": "recorded-v1",
+    "require_distinct_identities": true,
+    "routes": [
+      {
+        "id": "independent-source",
+        "reviewer_id": "unavailable-enforced-source-reviewer",
+        "boundary": {
+          "read_only": true,
+          "enforced": true,
+          "paths": "tracked-source",
+          "tools": ["source-read", "diff-read"],
+          "network": true,
+          "disclosure": "public-source"
+        }
+      }
+    ]
+  },
+  "references": {
+    "instructions": "docs/quality.md",
+    "architecture": "docs/inspection-notebook-design.md",
+    "threat_model": "docs/quality.md",
+    "integration": "docs/quality.md"
+  }
+}
